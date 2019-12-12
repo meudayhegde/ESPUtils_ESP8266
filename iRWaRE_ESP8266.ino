@@ -9,9 +9,31 @@
 #include <IRutils.h>
 
 #define LEGACY_TIMING_INFO false
+#define LED 02
 
-const char* WiFiConfig = "/WiFiConfig.json";
+const char* WiFiConfigFile = "/WiFiConfig.json";
 const char* LoginCredential = "/LoginCredential.json";
+
+struct UserConfig{
+    String user;
+    String pass;
+};
+
+UserConfig userConfig;
+
+
+struct WirelessConfig{
+    String wireless_mode;
+    String station_ssid;
+    String station_psk;
+    String ap_ssid;
+    String ap_psk;
+};
+
+WirelessConfig wirelessConfig;
+
+bool wireless_updated = false;
+
 const int port = 48321;
 const int recv_timeout = 8;
 
@@ -21,14 +43,9 @@ const uint16_t kIrLed = 4;
 const uint32_t kBaudRate = 115200;
 const uint16_t kCaptureBufferSize = 1024;
 
-String USERNAME;
-String PASSWORD;
+const uint8_t kTimeout = 50;  // Milli-Seconds
 
-#if DECODE_AC
-    const uint8_t kTimeout = 50;
-#else
-    const uint8_t kTimeout = 15;
-#endif 
+const uint16_t kFrequency = 38000;
 
 const uint16_t kMinUnknownSize = 12;
 
@@ -45,9 +62,7 @@ void setup() {
     #else
         Serial.begin(kBaudRate, SERIAL_8N1);
     #endif
-    
-    while (!Serial) delay(50);
-    
+    pinMode(LED,OUTPUT);
     SPIFFS.begin();
     initWireless();
     server.begin();
@@ -61,6 +76,102 @@ void setup() {
     initUser();
 }
 
+void initWireless(){
+  /* 
+   * initialize wifi/softAP based on the settings saved in wifi config file.
+   */
+    File file = SPIFFS.open(WiFiConfigFile, "r");
+    if (!file)
+        Serial.println("file open failed!, falling back to default configs");
+        
+    const size_t capacity = JSON_OBJECT_SIZE(5) + 240;
+    DynamicJsonDocument doc(capacity);
+    DeserializationError error = deserializeJson(doc, file);
+    if (error)
+        Serial.println("file parsing failed!, falling back to default configs");
+    
+    const char* wifiMode = doc["mode"] | "AP";
+    const char* wifi_name = doc["wifi_name"] | "iRWaRE";
+    const char* wifi_password = doc["wifi_pass"] | "infrared.redefined";
+    const char* ap_name = doc["ap_name"] | "iRWaRE";
+    const char* ap_pass = doc["ap_pass"] | "infrared.redefined";
+
+    wirelessConfig.wireless_mode = wifiMode;
+    wirelessConfig.station_ssid = wifi_name;
+    wirelessConfig.station_psk = wifi_password;
+    wirelessConfig.ap_ssid = ap_name;
+    wirelessConfig.ap_psk = ap_pass;
+    
+    if(strcmp(wifiMode,"WIFI") == 0){
+      //config prefered as wifi
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(wifi_name, wifi_password);
+        Serial.print("connecting to wifi network: ");
+        Serial.println(wifi_name);
+        Serial.print("using password: ");
+        Serial.println(wifi_password);
+        for(int i = 0; i < 40 ; i++){
+            digitalWrite(LED,LOW);
+            if(WiFi.status() == WL_CONNECTED){
+                Serial.println("WiFi Connection established...");
+                Serial.print("IP Address: ");Serial.println(WiFi.localIP());
+                delay(2000);
+                digitalWrite(LED,HIGH);
+                break;
+            }
+            Serial.print(".");
+            delay(50);
+            digitalWrite(LED,HIGH);
+            delay(450);
+        }
+        Serial.println();
+    }if(strcmp(wifiMode,"AP") == 0 || WiFi.status() != WL_CONNECTED){
+      //config prefered as softAP or wifi connection timed out 
+        WiFi.mode(WIFI_AP);
+        Serial.print("Beginning SoftAP: ");
+        Serial.println(ap_name);
+        WiFi.softAP(ap_name,ap_pass,1,0,5);
+        Serial.print("IP Address: ");Serial.println(WiFi.softAPIP());
+        ledPulse(1000,2000,3);
+    }
+}
+
+void ledPulse(int _on,int _off,int _count){
+    int count = 0;
+    while(count<_count){
+        Serial.print(".");
+        digitalWrite(LED,LOW);
+        delay(_on);
+        digitalWrite(LED,HIGH);
+        delay(_off);
+        count++;
+    }
+    Serial.println();
+}
+
+void initUser(){
+    File file = SPIFFS.open(LoginCredential, "r");
+    const char* user;
+    const char* pass;
+    if (file){
+        const size_t capacity = JSON_OBJECT_SIZE(2) + 100;
+        DynamicJsonDocument doc(capacity);
+        DeserializationError error = deserializeJson(doc, file);
+        if (error)
+            Serial.println("file parsing failed!, falling back to default configs");
+            
+        user = doc["username"] | "iRWaRE";
+        pass = doc["password"] | "infrared.redefined";
+    }else{
+        Serial.println("file open failed!, falling back to default configs");
+        user = "iRWaRE";
+        pass = "infrared.redefined";
+    }
+
+    userConfig.user = user;
+    userConfig.pass = pass;
+}
+
 void loop() {
     WiFiClient client = server.available();
     if (client) {
@@ -68,144 +179,226 @@ void loop() {
             Serial.print("Client Connected, client IP: ");Serial.println(client.remoteIP());
         }
         while(client.connected()){      
-            while(client.available()>0){
-                String result = requestHandler(client.readStringUntil('\n'));
-                Serial.println(String("response: "+result));
+            while(client.available()){
+                String result = requestHandler(client.readStringUntil('\n'),client);
                 result.replace("\n","");
                 client.println(result); 
                 client.flush();
+                client.stop();
             }
         }
-        client.stop();
         Serial.println("Client disconnected");    
+    }
+    if(wireless_updated){
+        initWireless();
+        wireless_updated = false;
     }
 }
 
-void initUser(){
-    String content = readFromFile(LoginCredential,String("{\"username\":\"_-!#__\",\"password\":\"!!+@-_<!7a>\"}"));
-    const size_t capacity = JSON_OBJECT_SIZE(2) + 100;
-    DynamicJsonDocument jsonDocument(capacity);
-    deserializeJson(jsonDocument, content.c_str());
-    const char* username = jsonDocument["username"];
-    const char* password = jsonDocument["password"];
+String requestHandler(String request,WiFiClient client){
+    const size_t capacity = JSON_OBJECT_SIZE(6) + (request.length()*1.5);
 
-    USERNAME = username;
-    PASSWORD = password;
-}
-
-String requestHandler(String request){
-    Serial.print("Incomming request: ");Serial.println(request);
-
-    const size_t capacity = JSON_OBJECT_SIZE(5) + 1024;
-    DynamicJsonDocument doc(capacity);
-   
-    deserializeJson(doc, request);
+    if(capacity > 5120 )
+        return String("{\"response\":\"request size limit exceeded!!\"}");
     
-    const char* req = doc["request"];
-    const char* username = doc["username"];
-    const char* password = doc["password"];
-    const char* data = doc["data"];
-    const int len = doc["length"];
+    DynamicJsonDocument doc(capacity);
+    DeserializationError error = deserializeJson(doc, request.c_str());
+    if (error)
+        return String("Invalid Request!");
+    
+    const char* req = doc["request"] | "undefined";
+    const char* username = doc["username"] | "";
+    const char* password = doc["password"] | "";
+    const char* irData = doc["irCode"] | "";
+    const char* len = doc["length"] | "0";
+    const char* protocol = doc["protocol"] | "UNKNOWN";
 
-    if(String(req)=="ping"){
+    uint16_t size = strtol(len,NULL,16);
+
+    Serial.print("Incomming request: ");Serial.println(req);
+
+    if(strcmp(req,"undefined") == 0){
+        return String("{\"response\":\"Purpose Undefined\"}");
+    }else if(strcmp(req,"ping") == 0){
         return String("{\"MAC\":\"")+WiFi.macAddress()+"\"}";
-    }else if(String(req)=="authenticate"){
+    }else if(strcmp(req,"authenticate") == 0){
         if(authenticate(username,password)){
             return String("{\"response\":\"authenticated\"}");
         }else return String("{\"response\":\"deny\"}");
-    }else if(String(req)=="ir_capture"){
+    }else if(strcmp(req,"ir_capture") == 0){
         if(authenticate(username,password)){
-            return irCapture();
+            return irCapture(false,client);
         }else return String("{\"response\":\"deny\"}");
-    }else if(String(req)=="ir_send"){
+    }else if(strcmp(req,"ir_send") == 0){
         if(authenticate(username,password)){
-            return irSend(len,data);
+            digitalWrite(LED,LOW);
+            String result =  irSend(size,protocol,irData);
+            digitalWrite(LED,HIGH);
+            return result;
         }else return String("{\"response\":\"deny\"}");
-    }else if(String(req)=="set_config"){
+    }else if(strcmp(req,"set_config") == 0){
         return String("");
+    }else if(strcmp(req,"set_wireless") == 0){
+        if(authenticate(username,password)){
+            const char* wireless_mode = doc["wireless_mode"] | "AP";
+            if(strcmp(wireless_mode,"WIFI") == 0){
+                const char* wireless_name = doc["new_ssid"] | wirelessConfig.station_ssid.c_str();
+                const char* wireless_pass = doc["new_pass"] | wirelessConfig.station_psk.c_str();
+                return setWireless("WIFI",wireless_name,wireless_pass);
+            }else{
+                const char* wireless_name = doc["new_ssid"] | wirelessConfig.ap_ssid.c_str();
+                const char* wireless_pass = doc["new_pass"] | wirelessConfig.ap_psk.c_str();
+                return setWireless("AP",wireless_name,wireless_pass);
+            }
+        }else return String("{\"response\":\"deny\"}");
+    }else if(strcmp(req,"set_user") == 0){
+        if(authenticate(username,password)){
+            const char* user = doc["new_username"] | username;
+            const char* pass = doc["new_password"] | password;
+            return setUser(user,pass);
+        }else return String("{\"response\":\"deny\"}");
     }else{
-        return String("--empty response--");
+        return String("{\"response\":\"Invalid Purpose\"}");
     }
 }
 
-String irSend(int len,const char* rawdataString){
-    const size_t capacity = JSON_ARRAY_SIZE(len);
+String setWireless(const char* wireless_mode,const char* wireless_name,const char* wireless_passwd){
+    SPIFFS.remove(WiFiConfigFile);
+    File file = SPIFFS.open(WiFiConfigFile, "w");
+    if (!file){
+        Serial.println("file open failed!, falling back to default configs");
+        return String("{\"response\":\"Config File Creation Failed\"}");
+    }
+        
+    const size_t capacity = JSON_OBJECT_SIZE(5) + 240;
     DynamicJsonDocument doc(capacity);
-    deserializeJson(doc, rawdataString);
-
-    uint16_t rawData[len];
     
-    for(int i=0;i<len;i++){
-        rawData[i] = doc[i];
+    if(strcmp(wireless_mode,"WIFI") == 0){
+        doc["mode"] = "WIFI";
+        doc["wifi_name"] = wireless_name;
+        doc["wifi_pass"] = wireless_passwd;
+        doc["ap_name"] = wirelessConfig.ap_ssid.c_str();
+        doc["ap_pass"] = wirelessConfig.ap_psk.c_str();
+    }else{
+        doc["mode"] = "AP";
+        doc["wifi_name"] = wirelessConfig.station_ssid.c_str();
+        doc["wifi_pass"] = wirelessConfig.station_psk.c_str();
+        doc["ap_name"] = wireless_name;
+        doc["ap_pass"] = wireless_passwd;
     }
 
-    irsend.sendRaw(rawData, len, 38);
-
-    return String("{\"response\":\"success\"}");
+    if (serializeJson(doc, file) == 0) {
+        Serial.println(F("Failed to write to file"));
+        file.close();
+        return String("{\"response\":\"Config File Write Failed\"}");
+    }
+    file.close();
+    wireless_updated = true;
+    return String("{\"response\":\"Wireless config successfully applied\"}");
 }
 
-String irCapture(){
+String setUser(const char* user_name,const char* passwd){
+    SPIFFS.remove(LoginCredential);
+    File file = SPIFFS.open(LoginCredential, "w");
+    if (!file)
+        Serial.println("file open failed!, falling back to default configs");
+        
+    const size_t capacity = JSON_OBJECT_SIZE(2) + 100;
+    DynamicJsonDocument doc(capacity);
+    doc["username"] = user_name;
+    doc["password"] = passwd;
+    if (serializeJson(doc, file) == 0) {
+        Serial.println(F("Failed to write to file"));
+        file.close();
+        return String("{\"response\":\"Config File Write Failed\"}");
+    }
+    file.close();
+    initUser();
+    return String("{\"response\":\"User config successfully applied\"}");
+}
+
+String generateIrResult(const decode_results * const results){
+    decode_type_t protocol = results->decode_type;
+    uint16_t size = results->bits;
+    
+    irrecv.disableIRIn();
+    Serial.println(typeToString(protocol));
+    String output = String("{\"response\":\"success\",\"protocol\":\"")+typeToString(protocol)+"\",\"length\":\"";
+    if (protocol == decode_type_t::UNKNOWN) {
+        output += uint64ToString(getCorrectedRawLength(results), 16);
+        output += F("\",\"irCode\":\"[ ");
+
+        for (uint16_t i = 1; i < results->rawlen; i++) {
+            uint32_t usecs;
+            for (usecs = results->rawbuf[i] * kRawTick; usecs > UINT16_MAX;usecs -= UINT16_MAX) {
+                output += uint64ToString(UINT16_MAX);
+                if (i % 2)
+                    output += F(", 0,  ");
+                else
+                    output += F(",  0, ");
+            }
+            output += uint64ToString(usecs, 10);
+            if (i < results->rawlen - 1)
+                output += kCommaSpaceStr;
+            if (i % 2 == 0) output += ' ';
+        }
+        output += F(" ]\"}");
+    } else if (hasACState(protocol)) {
+          uint16_t nbytes = results->bits / 8;
+          output += uint64ToString(nbytes,16);
+          output += F("\",\"irCode\":\"[ ");
+          for (uint16_t i = 0; i < nbytes; i++) {
+              output += F("'0x");
+              if (results->state[i] < 0x10) output += '0';
+              output += uint64ToString(results->state[i], 16);
+              output += F("'");
+              if (i < nbytes - 1) output += kCommaSpaceStr;
+          }
+          output += F("]\"}");
+    } else {
+        output += uint64ToString(size,16); 
+        output += "\",\"irCode\":\""+uint64ToString(results->value, 16)+"\"}";
+    }
+    output.replace(" ","");
+    return output;
+}
+
+String irCapture(bool multiCapture, WiFiClient client){
     Serial.println("beginning ir capture procedure" );
     irrecv.enableIRIn();
     String result="{\"response\":\"timeout\"}";
     uint32_t start_time = millis();
     Serial.println(String("start time: ")+start_time);
-    while((millis()-start_time) < (1000*recv_timeout)){
+    int count = 0;
+    while((millis()-start_time) < (1000*recv_timeout) && client.connected()){
         if (irrecv.decode(&results)) {
-            yield();
-            result = String("{\"response\":\"rawData\",")+generateRawResponse(&results)+"}";
-            irrecv.disableIRIn();
-            return result;
+            result = generateIrResult(&results);
+            if(multiCapture){
+                client.println(result);
+                client.flush();
+                start_time = millis();
+            }else{
+                break;
+            }
         }
-        delay(10);
+        if(count%100 == 0){
+            digitalWrite(LED,LOW);
+        }else if((count-8)%100 == 0){
+            digitalWrite(LED,HIGH);
+        }
+        delay(1);
+        count++;
     }
+    digitalWrite(LED,HIGH);
     irrecv.disableIRIn();
+    if(multiCapture){
+        return "{\"response\":\"success\",\"status\":\"Capture Finished\"}";
+    }
     return result;
 }
 
 bool authenticate(const char* username, const char* password){
-  Serial.println(USERNAME);
-  Serial.println(PASSWORD);
-    if(USERNAME==username && PASSWORD==password) return true; else return false;
-}
-
-void initWireless(){
-  /* 
-   * initialize wifi/softAP based on the settings saved in wifi config file.
-   */
-    
-    String content = readFromFile(WiFiConfig,String("{\"mode\":\"AP\",\"wifi_name\":\"myJio-Hotspot\",\"wifi_pass\":\"finalDestination\",\"ap_name\":\"iRWaRE\",\"ap_pass\":\"infraredEverywhere\"}"));
-    const size_t capacity = JSON_OBJECT_SIZE(5) + 120;
-    DynamicJsonDocument jsonDocument(capacity);
-    deserializeJson(jsonDocument, content.c_str());
-    const char* mode = jsonDocument["mode"];
-    const char* wifi_name = jsonDocument["wifi_name"];
-    const char* wifi_password = jsonDocument["wifi_password"];
-    const char* ap_name = jsonDocument["ap_name"];
-    const char* ap_pass = jsonDocument["ap_pass"];
-    
-    if(String(mode)=="WIFI"){
-      //config prefered as wifi
-        WiFi.begin(wifi_name, wifi_password);
-        Serial.print("connecting to wifi network: ");
-        Serial.println(wifi_name);
-        for(int i=0;i<20;i++){
-            if(WiFi.status() == WL_CONNECTED){
-              Serial.println("WiFi Connection established...");
-              Serial.print("IP Address: ");Serial.println(WiFi.localIP());
-              break;
-            }
-            Serial.print(".");
-            delay(500);
-        }
-        Serial.println();
-    }if(String(mode)=="AP" || WiFi.status() != WL_CONNECTED){
-      //config prefered as softAP or wifi connection timed out 
-        Serial.print("Beginning SoftAP: ");
-        Serial.println(ap_name);
-        WiFi.softAP(ap_name,ap_pass,1,0,5);
-        Serial.print("IP Address: ");Serial.println(WiFi.softAPIP());
-    }
+    if(userConfig.user == username && userConfig.pass == password ) return true; else return false;
 }
 
 String readFromFile(const char* file_path,String default_str){
@@ -222,26 +415,75 @@ String readFromFile(const char* file_path,String default_str){
     }
 }
 
-String generateRawResponse(const decode_results * const results) {
-    String output = "\"length\":";
-    output += uint64ToString(getCorrectedRawLength(results), 10);
-    output += F(",\"irCode\":[ ");
 
-    for (uint16_t i = 1; i < results->rawlen; i++) {
-        uint32_t usecs;
-        for (usecs = results->rawbuf[i] * kRawTick; usecs > UINT16_MAX;usecs -= UINT16_MAX) {
-            output += uint64ToString(UINT16_MAX);
-            if (i % 2)
-                output += F(", 0,  ");
-            else
-                output += F(",  0, ");
-        }
-        output += uint64ToString(usecs, 10);
-        if (i < results->rawlen - 1)
-            output += kCommaSpaceStr;
-        if (i % 2 == 0) output += ' ';
+String irSend(uint16_t size,const char* protocol_str,const char* irData){
+    decode_type_t protocol = strToDecodeType(protocol_str);
+    if (protocol == decode_type_t::UNKNOWN) {
+        sendRawArray(size,irData);
+    } else{ 
+        bool success = false;
+        if (hasACState(protocol))
+            success = sendIrState(size,protocol,irData);
+        else
+            success = sendIrValue(size,protocol,irData);
+
+        if(success)
+            return String("{\"response\":\"")+typeToString(protocol)+" success\"}";
+        else
+           return String("{\"response\":\"")+typeToString(protocol)+" failed\"}";
+    }
+    return String("{\"response\":\"success\"}");
+}
+
+
+void sendRawArray(uint16_t size,const char* irData){
+    const size_t capacity = JSON_ARRAY_SIZE(size);
+    DynamicJsonDocument json(capacity);
+    deserializeJson(json, irData);
+
+    uint16_t rawData[size];
+    
+    for(int i=0;i<size;i++){
+        rawData[i] = json[i];
     }
 
-    output += F(" ] ");
-    return output;
+    irsend.sendRaw(rawData, size, kFrequency);
+}
+
+bool sendIrValue(uint16_t size,decode_type_t protocol,const char* irData){
+    uint64_t value = getUInt64fromHex(irData);
+    return irsend.send(protocol, value, size);
+}
+
+bool sendIrState(uint16_t size,decode_type_t protocol, const char* data){
+    String stateListString = String(data);
+    stateListString.replace("'","\"");
+    const size_t capacity = JSON_ARRAY_SIZE(size) + (6*size);
+    DynamicJsonDocument doc(capacity);
+    deserializeJson(doc, stateListString.c_str());
+    Serial.println(stateListString);
+    uint8_t stateList[size];
+    for(int i=0;i<size;i++){
+        const char* hexStr = doc[i];
+        stateList[i] = strtol(hexStr,NULL,16);
+    }
+    return irsend.send(protocol,stateList, size);
+}
+
+uint64_t getUInt64fromHex(char const *str) {
+  uint64_t result = 0;
+  uint16_t offset = 0;
+  // Skip any leading '0x' or '0X' prefix.
+  if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) offset = 2;
+  for (; isxdigit((unsigned char)str[offset]); offset++) {
+    char c = str[offset];
+    result *= 16;
+    if (isdigit(c))
+      result += c - '0';  // '0' .. '9'
+    else if (isupper(c))
+      result += c - 'A' + 10;  // 'A' .. 'F'
+    else
+      result += c - 'a' + 10;  // 'a' .. 'f'
+  }
+  return result;
 }
