@@ -212,6 +212,7 @@ String requestHandler(String request,WiFiClient client){
     const char* irData = doc["irCode"] | "";
     const char* len = doc["length"] | "0";
     const char* protocol = doc["protocol"] | "UNKNOWN";
+    const int cap_mode = doc["capture_mode"] | 0;
 
     uint16_t size = strtol(len,NULL,16);
 
@@ -227,7 +228,7 @@ String requestHandler(String request,WiFiClient client){
         }else return String("{\"response\":\"deny\"}");
     }else if(strcmp(req,"ir_capture") == 0){
         if(authenticate(username,password)){
-            return irCapture(false,client);
+            return irCapture(cap_mode,client);
         }else return String("{\"response\":\"deny\"}");
     }else if(strcmp(req,"ir_send") == 0){
         if(authenticate(username,password)){
@@ -368,9 +369,18 @@ String irCapture(bool multiCapture, WiFiClient client){
     irrecv.enableIRIn();
     String result="{\"response\":\"timeout\"}";
     uint32_t start_time = millis();
+    int cur_val = (millis()-start_time)/1000;
+    int prev_val = cur_val;
+    String res = String("{\"response\":\"progress\",\"value\":");
+    String temp = res+recv_timeout;
+    temp+="}";
+    client.println(temp);
+    client.flush();
     Serial.println(String("start time: ")+start_time);
     int count = 0;
-    while((millis()-start_time) < (1000*recv_timeout) && client.connected()){
+    while((cur_val < recv_timeout) && client.connected()){
+        cur_val = (millis()-start_time)/1000;
+        
         if (irrecv.decode(&results)) {
             result = generateIrResult(&results);
             if(multiCapture){
@@ -386,14 +396,20 @@ String irCapture(bool multiCapture, WiFiClient client){
         }else if((count-8)%100 == 0){
             digitalWrite(LED,HIGH);
         }
+
+        if(cur_val > prev_val){
+            temp = res+(recv_timeout-cur_val);
+            temp+="}";
+            client.println(temp);
+            client.flush();
+            prev_val = cur_val;
+        }
+        
         delay(1);
         count++;
     }
     digitalWrite(LED,HIGH);
     irrecv.disableIRIn();
-    if(multiCapture){
-        return "{\"response\":\"success\",\"status\":\"Capture Finished\"}";
-    }
     return result;
 }
 
