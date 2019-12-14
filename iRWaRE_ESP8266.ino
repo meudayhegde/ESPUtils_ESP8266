@@ -154,7 +154,7 @@ void initUser(){
     const char* user;
     const char* pass;
     if (file){
-        const size_t capacity = JSON_OBJECT_SIZE(2) + 100;
+        const size_t capacity = JSON_OBJECT_SIZE(2) + 200;
         DynamicJsonDocument doc(capacity);
         DeserializationError error = deserializeJson(doc, file);
         if (error)
@@ -369,7 +369,7 @@ String irCapture(bool multiCapture, WiFiClient client){
     irrecv.enableIRIn();
     String result="{\"response\":\"timeout\"}";
     uint32_t start_time = millis();
-    int cur_val = (millis()-start_time)/1000;
+    int cur_val = 0;
     int prev_val = cur_val;
     String res = String("{\"response\":\"progress\",\"value\":");
     String temp = res+recv_timeout;
@@ -380,14 +380,29 @@ String irCapture(bool multiCapture, WiFiClient client){
     int count = 0;
     while((cur_val < recv_timeout) && client.connected()){
         cur_val = (millis()-start_time)/1000;
+
+        if(cur_val > prev_val){
+            digitalWrite(LED,HIGH);
+            temp = res+(recv_timeout-cur_val);
+            temp+="}";
+            client.println(temp);
+            client.flush();
+            prev_val = cur_val;
+        }  
         
         if (irrecv.decode(&results)) {
-            result = generateIrResult(&results);
+          irrecv.disableIRIn();
             if(multiCapture){
-                client.println(result);
+                digitalWrite(LED,HIGH);
+                client.println(generateIrResult(&results));
                 client.flush();
+                irrecv.enableIRIn();
                 start_time = millis();
+                cur_val = 0;
+                prev_val = -1;
+                irrecv.resume();
             }else{
+                result = generateIrResult(&results);
                 break;
             }
         }
@@ -395,25 +410,18 @@ String irCapture(bool multiCapture, WiFiClient client){
             digitalWrite(LED,LOW);
         }else if((count-8)%100 == 0){
             digitalWrite(LED,HIGH);
-        }
-
-        if(cur_val > prev_val){
-            temp = res+(recv_timeout-cur_val);
-            temp+="}";
-            client.println(temp);
-            client.flush();
-            prev_val = cur_val;
-        }
-        
+        }      
         delay(1);
+        yield();
         count++;
     }
     digitalWrite(LED,HIGH);
-    irrecv.disableIRIn();
     return result;
 }
 
 bool authenticate(const char* username, const char* password){
+    Serial.println(userConfig.user);
+    Serial.println(userConfig.pass);
     if(userConfig.user == username && userConfig.pass == password ) return true; else return false;
 }
 
