@@ -258,9 +258,20 @@ String requestHandler(String request,WiFiClient client){
             const char* pass = doc["new_password"] | password;
             return setUser(user,pass);
         }else return String("{\"response\":\"deny\"}");
+    }else if(strcmp(req,"get_wireless") == 0){
+        if(authenticate(username,password)){
+          return getWireless();
+        }else return String("{\"response\":\"deny\"}");
     }else{
         return String("{\"response\":\"Invalid Purpose\"}");
     }
+}
+
+
+String getWireless(){
+    String result = "{\"wireless_mode\":\"";
+    result += wirelessConfig.wireless_mode + "\",\"station_ssid\":\"" + wirelessConfig.station_ssid + "\",\"station_psk\":\"" + wirelessConfig.station_psk + "\",\"ap_ssid\":\"" + wirelessConfig.ap_ssid + "\",\"ap_psk\":\"" + wirelessConfig.ap_psk + "\"}";
+    return result;
 }
 
 String setWireless(const char* wireless_mode,const char* wireless_name,const char* wireless_passwd){
