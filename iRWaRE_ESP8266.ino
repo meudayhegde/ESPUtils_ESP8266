@@ -13,14 +13,12 @@
 
 const char* WiFiConfigFile = "/WiFiConfig.json";
 const char* LoginCredential = "/LoginCredential.json";
+const char* GPIOConfigFile = "/GPIOConfig.json";
 
 struct UserConfig{
     String user;
     String pass;
 };
-
-UserConfig userConfig;
-
 
 struct WirelessConfig{
     String wireless_mode;
@@ -31,6 +29,7 @@ struct WirelessConfig{
 };
 
 WirelessConfig wirelessConfig;
+UserConfig userConfig;
 
 bool wireless_updated = false;
 
@@ -64,16 +63,90 @@ void setup() {
     #endif
     pinMode(LED,OUTPUT);
     SPIFFS.begin();
+    applyGPIO(-1, "", 0);
     initWireless();
     server.begin();
-    
     #if DECODE_HASH
         irrecv.setUnknownThreshold(kMinUnknownSize);
     #endif
-
     irsend.begin();
-
     initUser();
+}
+
+void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue){
+  /*
+   * Apply GPIO settings and store in config file
+   */
+    File file = SPIFFS.open(GPIOConfigFile, "r");
+    if (!file)
+        Serial.println("file GPIOConfig.json open failed!, falling back to default configs");
+    String gpioConfig = file.readStringUntil(']') + "]";
+    const size_t capacity = gpioConfig.length() + 512;
+    DynamicJsonDocument doc(capacity);
+    DeserializationError error = deserializeJson(doc, gpioConfig);
+    if (error)
+        Serial.println("file parsing failed!, falling back to default configs");
+        
+    JsonArray array = doc.as<JsonArray>();
+    bool pinConfExist = false;
+    for(JsonVariant gpio : array) {
+        const int pin = gpio["pinNumber"];
+        if(GPIOPinNumber != -1 && pin == GPIOPinNumber){
+            gpio["pinNumber"] = GPIOPinNumber;
+            gpio["pinMode"] = GPIOPinMode;
+            gpio["pinValue"] = GPIOPinValue;
+        }
+        if(GPIOPinNumber == -1 || pin == GPIOPinNumber){
+            pinConfExist = true;
+            const char* PinMode = gpio["pinMode"];
+            const int PinValue = gpio["pinValue"];
+            if(strcmp(PinMode, "OUTPUT") == 0){
+                pinMode(pin, OUTPUT);
+                digitalWrite(pin, PinValue);
+            }
+        }
+    }
+    if(!pinConfExist){
+        const size_t capacity = JSON_ARRAY_SIZE(3) + 128;
+        StaticJsonDocument<capacity> docNewPin;
+        docNewPin["pinNumber"] = GPIOPinNumber;
+        docNewPin["pinMode"] = GPIOPinMode;
+        docNewPin["pinValue"] = GPIOPinValue;
+        doc.add(docNewPin);
+        if(strcmp(GPIOPinMode, "OUTPUT") == 0){
+            pinMode(GPIOPinNumber, OUTPUT);
+            digitalWrite(GPIOPinNumber, GPIOPinValue);
+        }
+    }
+    serializeJson(doc, file);
+    file.close();
+}
+
+String getGPIO(const int pinNumber){
+    File file = SPIFFS.open(GPIOConfigFile, "r");
+    if (!file)
+        Serial.println("file GPIOConfig.json open failed!, falling back to default configs");
+    String gpioConfig = file.readStringUntil(']') + "]";
+    if(pinNumber == -1){
+        return gpioConfig;
+    }
+    const size_t capacity = gpioConfig.length() + 512;
+    DynamicJsonDocument doc(capacity);
+    DeserializationError error = deserializeJson(doc, gpioConfig);
+    if (error)
+        Serial.println("file parsing failed!, falling back to default configs");
+        
+    JsonArray array = doc.as<JsonArray>();
+    for(JsonVariant gpio : array) {
+        const int pin = gpio["pinNumber"];
+        if(pin == pinNumber){
+            String output;
+            serializeJson(gpio, output);
+            file.close();
+            return output;
+        }
+    }
+    file.close();
 }
 
 void initWireless(){
@@ -125,18 +198,18 @@ void initWireless(){
             delay(450);
         }
         Serial.println();
-    }if(strcmp(wifiMode,"AP") == 0 || WiFi.status() != WL_CONNECTED){
+    }if(strcmp(wifiMode, "AP") == 0 || WiFi.status() != WL_CONNECTED){
       //config prefered as softAP or wifi connection timed out 
         WiFi.mode(WIFI_AP);
         Serial.print("Beginning SoftAP: ");
         Serial.println(ap_name);
-        WiFi.softAP(ap_name,ap_pass,1,0,5);
+        WiFi.softAP(ap_name, ap_pass, 1, 0,5);
         Serial.print("IP Address: ");Serial.println(WiFi.softAPIP());
         ledPulse(1000,2000,3);
     }
 }
 
-void ledPulse(int _on,int _off,int _count){
+void ledPulse(int _on, int _off, int _count){
     int count = 0;
     while(count<_count){
         Serial.print(".");
@@ -195,7 +268,7 @@ void loop() {
     }
 }
 
-String requestHandler(String request,WiFiClient client){
+String requestHandler(String request, WiFiClient client){
     const size_t capacity = JSON_OBJECT_SIZE(6) + (request.length()*1.5);
 
     if(capacity > 5120 )
@@ -262,11 +335,23 @@ String requestHandler(String request,WiFiClient client){
         if(authenticate(username,password)){
           return getWireless();
         }else return String("{\"response\":\"deny\"}");
+    }else if(strcmp(req, "gpio_set") == 0){
+        if(authenticate(username,password)){
+            const int GPIOPinNumber = doc["pinNumber"];
+            const char* GPIOPinMode = doc["pinMode"];
+            const int GPIOPinValue = doc["pinValue"];
+            applyGPIO(GPIOPinNumber, GPIOPinMode, GPIOPinValue);
+            return String("{\"response\": \"success\"}");
+        }else return String("{\"response\":\"deny\"}");
+    }else if(strcmp(req, "gpio_get") == 0){
+        if(authenticate(username,password)){
+            const int GPIOPinNumber = doc["pinNumber"];
+            return getGPIO(GPIOPinNumber);
+        }else return String("{\"response\":\"deny\"}");
     }else{
         return String("{\"response\":\"Invalid Purpose\"}");
     }
 }
-
 
 String getWireless(){
     String result = "{\"wireless_mode\":\"";
