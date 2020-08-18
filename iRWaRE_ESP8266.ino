@@ -86,7 +86,6 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
     DeserializationError error = deserializeJson(doc, gpioConfig);
     if (error)
         Serial.println("file parsing failed!, falling back to default configs");
-        
     JsonArray array = doc.as<JsonArray>();
     bool pinConfExist = false;
     for(JsonVariant gpio : array) {
@@ -107,19 +106,21 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
         }
     }
     if(!pinConfExist){
-        const size_t capacity = JSON_ARRAY_SIZE(3) + 128;
-        StaticJsonDocument<capacity> docNewPin;
+        JsonObject docNewPin = doc.createNestedObject();
         docNewPin["pinNumber"] = GPIOPinNumber;
         docNewPin["pinMode"] = GPIOPinMode;
         docNewPin["pinValue"] = GPIOPinValue;
-        doc.add(docNewPin);
         if(strcmp(GPIOPinMode, "OUTPUT") == 0){
             pinMode(GPIOPinNumber, OUTPUT);
             digitalWrite(GPIOPinNumber, GPIOPinValue);
         }
     }
-    serializeJson(doc, file);
+    
     file.close();
+    file = SPIFFS.open(GPIOConfigFile, "w");
+    if (!file)
+        Serial.println("file GPIOConfig.json open failed!, falling back to default configs");
+    serializeJson(doc, file);
 }
 
 String getGPIO(const int pinNumber){
