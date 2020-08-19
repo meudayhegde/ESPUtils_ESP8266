@@ -247,6 +247,7 @@ void initUser(){
 }
 
 void loop() {
+    checkResetState(4);
     WiFiClient client = server.available();
     if (client) {
         if(client.connected()){
@@ -267,6 +268,32 @@ void loop() {
         initWireless();
         wireless_updated = false;
     }
+}
+
+void checkResetState(const int pinNumber){
+    pinMode(pinNumber, INPUT);
+    int pinState = digitalRead(pinNumber);
+    uint32_t start_time = millis();
+    int cur_time = 0;
+    if(pinState == 1){
+        Serial.println("Reset button clicked, will reset config if reset button is kept on hold for 10 seconds");
+    }
+    int count = 0;
+    while(cur_time < 10){
+        cur_val = (millis()-start_time)/1000; 
+        if(pinState == 0) return;
+        pinState = digitalRead(pinNumber);
+    }
+    SPIFFS.remove(WiFiConfigFile);
+    File file = SPIFFS.open(GPIOConfigFile, "w");
+    if (!file){
+        Serial.println(String(GPIOConfigFile) + " file open failed!");
+    }else{
+        file.print("[]");
+        file.close()
+    }
+    setUser("iRWaRE", "infrared.redefined");
+    setWireless("AP", "iRWaRE", "infrared.redefined");
 }
 
 String requestHandler(String request, WiFiClient client){
@@ -381,7 +408,7 @@ String setWireless(const char* wireless_mode,const char* wireless_name,const cha
         doc["mode"] = "AP";
         doc["wifi_name"] = wirelessConfig.station_ssid.c_str();
         doc["wifi_pass"] = wirelessConfig.station_psk.c_str();
-        doc["ap_name"] = wireless_name;
+        doc["ap_name"] = wireless_name;ireless_name;
         doc["ap_pass"] = wireless_passwd;
     }
 
@@ -502,7 +529,7 @@ String irCapture(bool multiCapture, WiFiClient client){
                 result = generateIrResult(&results);
                 break;
             }
-        }
+        })
         if(count%100 == 0){
             digitalWrite(LED,LOW);
         }else if((count-8)%100 == 0){
