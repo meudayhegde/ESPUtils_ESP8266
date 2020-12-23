@@ -280,7 +280,7 @@ void checkResetState(const int pinNumber){
     }
     int count = 0;
     while(cur_time < 10){
-        cur_val = (millis()-start_time)/1000; 
+        cur_time = (millis()-start_time)/1000; 
         if(pinState == 0) return;
         pinState = digitalRead(pinNumber);
     }
@@ -290,7 +290,7 @@ void checkResetState(const int pinNumber){
         Serial.println(String(GPIOConfigFile) + " file open failed!");
     }else{
         file.print("[]");
-        file.close()
+        file.close();
     }
     setUser("iRWaRE", "infrared.redefined");
     setWireless("AP", "iRWaRE", "infrared.redefined");
@@ -376,6 +376,10 @@ String requestHandler(String request, WiFiClient client){
             const int GPIOPinNumber = doc["pinNumber"];
             return getGPIO(GPIOPinNumber);
         }else return String("{\"response\":\"deny\"}");
+    }else if(strcmp(req, "restart") == 0){
+        if(authenticate(username,password)){
+            ESP.restart();
+        }else return String("{\"response\":\"deny\"}");
     }else{
         return String("{\"response\":\"Invalid Purpose\"}");
     }
@@ -408,7 +412,7 @@ String setWireless(const char* wireless_mode,const char* wireless_name,const cha
         doc["mode"] = "AP";
         doc["wifi_name"] = wirelessConfig.station_ssid.c_str();
         doc["wifi_pass"] = wirelessConfig.station_psk.c_str();
-        doc["ap_name"] = wireless_name;ireless_name;
+        doc["ap_name"] = wireless_name;
         doc["ap_pass"] = wireless_passwd;
     }
 
@@ -529,7 +533,7 @@ String irCapture(bool multiCapture, WiFiClient client){
                 result = generateIrResult(&results);
                 break;
             }
-        })
+        }
         if(count%100 == 0){
             digitalWrite(LED,LOW);
         }else if((count-8)%100 == 0){
