@@ -452,7 +452,7 @@ String generateIrResult(const decode_results * const results){
     
     irrecv.disableIRIn();
     Serial.println(typeToString(protocol));
-    String output = String("{\"response\":\"success\",\"protocol\":\"")+typeToString(protocol)+"\",\"length\":\"";
+    String output = String("{\"response\":\"success\",\"protocol\":\"") + typeToString(protocol) + "\",\"length\":\"";
     if (protocol == decode_type_t::UNKNOWN) {
         output += uint64ToString(getCorrectedRawLength(results), 16);
         output += F("\",\"irCode\":\"[ ");
@@ -461,14 +461,10 @@ String generateIrResult(const decode_results * const results){
             uint32_t usecs;
             for (usecs = results->rawbuf[i] * kRawTick; usecs > UINT16_MAX;usecs -= UINT16_MAX) {
                 output += uint64ToString(UINT16_MAX);
-                if (i % 2)
-                    output += F(", 0,  ");
-                else
-                    output += F(",  0, ");
+                output += (i % 2)? F(", 0,  "): F(",  0, ");
             }
             output += uint64ToString(usecs, 10);
-            if (i < results->rawlen - 1)
-                output += kCommaSpaceStr;
+            if (i < results->rawlen - 1) output += kCommaSpaceStr;
             if (i % 2 == 0) output += ' ';
         }
         output += F(" ]\"}");
@@ -486,7 +482,7 @@ String generateIrResult(const decode_results * const results){
           output += F("]\"}");
     } else {
         output += uint64ToString(size,16); 
-        output += "\",\"irCode\":\""+uint64ToString(results->value, 16)+"\"}";
+        output += "\",\"irCode\":\"" + uint64ToString(results->value, 16) + "\"}";
     }
     output.replace(" ","");
     return output;
@@ -500,14 +496,14 @@ String irCapture(bool multiCapture, WiFiClient client){
     int cur_val = 0;
     int prev_val = cur_val;
     String res = String("{\"response\":\"progress\",\"value\":");
-    String temp = res+recv_timeout;
-    temp+="}";
+    String temp = res + recv_timeout;
+    temp += "}";
     client.println(temp);
     client.flush();
     Serial.println(String("start time: ")+start_time);
     int count = 0;
     while((cur_val < recv_timeout) && client.connected()){
-        cur_val = (millis()-start_time)/1000;
+        cur_val = (millis() - start_time)/1000;
 
         if(cur_val > prev_val){
             digitalWrite(LED,HIGH);
@@ -550,7 +546,7 @@ String irCapture(bool multiCapture, WiFiClient client){
 bool authenticate(const char* username, const char* password){
     Serial.println(userConfig.user);
     Serial.println(userConfig.pass);
-    if(userConfig.user == username && userConfig.pass == password ) return true; else return false;
+    return (userConfig.user == username && userConfig.pass == password );
 }
 
 String readFromFile(const char* file_path,String default_str){
@@ -568,37 +564,25 @@ String readFromFile(const char* file_path,String default_str){
 }
 
 
-String irSend(uint16_t size,const char* protocol_str,const char* irData){
+String irSend(uint16_t size, const char* protocol_str, const char* irData){
     decode_type_t protocol = strToDecodeType(protocol_str);
     if (protocol == decode_type_t::UNKNOWN) {
-        sendRawArray(size,irData);
+        sendRawArray(size, irData);
     } else{ 
-        bool success = false;
-        if (hasACState(protocol))
-            success = sendIrState(size,protocol,irData);
-        else
-            success = sendIrValue(size,protocol,irData);
-
-        if(success)
-            return String("{\"response\":\"")+typeToString(protocol)+" success\"}";
-        else
-           return String("{\"response\":\"")+typeToString(protocol)+" failed\"}";
+        bool success = (hasACState(protocol))? sendIrState(size, protocol, irData): sendIrValue(size, protocol, irData);
+        return String("{\"response\":\"") + typeToString(protocol) + " " + (success? "success": "failure") + "\"}";
     }
     return String("{\"response\":\"success\"}");
 }
-
 
 void sendRawArray(uint16_t size,const char* irData){
     const size_t capacity = JSON_ARRAY_SIZE(size);
     DynamicJsonDocument json(capacity);
     deserializeJson(json, irData);
-
     uint16_t rawData[size];
-    
     for(int i=0;i<size;i++){
         rawData[i] = json[i];
     }
-
     irsend.sendRaw(rawData, size, kFrequency);
 }
 
@@ -609,33 +593,26 @@ bool sendIrValue(uint16_t size,decode_type_t protocol,const char* irData){
 
 bool sendIrState(uint16_t size,decode_type_t protocol, const char* data){
     String stateListString = String(data);
-    stateListString.replace("'","\"");
+    stateListString.replace("'", "\"");
     const size_t capacity = JSON_ARRAY_SIZE(size) + (6*size);
     DynamicJsonDocument doc(capacity);
     deserializeJson(doc, stateListString.c_str());
     Serial.println(stateListString);
     uint8_t stateList[size];
-    for(int i=0;i<size;i++){
+    for(int i=0; i<size; i++){
         const char* hexStr = doc[i];
-        stateList[i] = strtol(hexStr,NULL,16);
+        stateList[i] = strtol(hexStr, NULL, 16);
     }
-    return irsend.send(protocol,stateList, size);
+    return irsend.send(protocol, stateList, size);
 }
 
-uint64_t getUInt64fromHex(char const *str) {
-  uint64_t result = 0;
-  uint16_t offset = 0;
-  // Skip any leading '0x' or '0X' prefix.
-  if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) offset = 2;
-  for (; isxdigit((unsigned char)str[offset]); offset++) {
-    char c = str[offset];
-    result *= 16;
-    if (isdigit(c))
-      result += c - '0';  // '0' .. '9'
-    else if (isupper(c))
-      result += c - 'A' + 10;  // 'A' .. 'F'
-    else
-      result += c - 'a' + 10;  // 'a' .. 'f'
-  }
-  return result;
+uint64_t getUInt64fromHex(char const *hex) {
+    uint64_t result = 0;
+    uint16_t offset = (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))? 2: 0;
+    for (; isxdigit((unsigned char)hex[offset]); offset++) {
+        char c = hex[offset];
+        result *= 16;
+        result += c - (isdigit(c)? '0': ((isupper(c)? 'A' : 'a') + 10));
+    }
+    return result;
 }
