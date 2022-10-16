@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <FS.h>
+#include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <IRrecv.h>
 #include <IRremoteESP8266.h>
@@ -62,7 +62,7 @@ void setup() {
         Serial.begin(kBaudRate, SERIAL_8N1);
     #endif
     pinMode(LED,OUTPUT);
-    SPIFFS.begin();
+    LittleFS.begin();
     applyGPIO(-1, "", 0);
     initWireless();
     server.begin();
@@ -77,15 +77,18 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
   /*
    * Apply GPIO settings and store in config file
    */
-    File file = SPIFFS.open(GPIOConfigFile, "r");
-    if (!file)
-        Serial.println("file GPIOConfig.json open failed!, falling back to default configs");
+    Serial.print(String("Reading File: ") + GPIOConfigFile + "...  ");
+    File file = LittleFS.open(GPIOConfigFile, "r");    
+    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+
     String gpioConfig = file.readStringUntil(']') + "]";
     const size_t capacity = gpioConfig.length() + 512;
     DynamicJsonDocument doc(capacity);
+
+    Serial.print("Parsing File...  ");
     DeserializationError error = deserializeJson(doc, gpioConfig);
-    if (error)
-        Serial.println("file parsing failed!, falling back to default configs");
+    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
+
     JsonArray array = doc.as<JsonArray>();
     bool pinConfExist = false;
     for(JsonVariant gpio : array) {
@@ -117,25 +120,29 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
     }
     
     file.close();
-    file = SPIFFS.open(GPIOConfigFile, "w");
-    if (!file)
-        Serial.println("file GPIOConfig.json open failed!, falling back to default configs");
+
+    Serial.print(String("Writing File: ") + GPIOConfigFile + "...  ");
+    file = LittleFS.open(GPIOConfigFile, "w");  
+    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+
     serializeJson(doc, file);
 }
 
 String getGPIO(const int pinNumber){
-    File file = SPIFFS.open(GPIOConfigFile, "r");
-    if (!file)
-        Serial.println("file GPIOConfig.json open failed!, falling back to default configs");
+    Serial.print(String("Reading File: ") + GPIOConfigFile + "...  ");
+    File file = LittleFS.open(GPIOConfigFile, "r"); 
+    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+    
     String gpioConfig = file.readStringUntil(']') + "]";
     if(pinNumber == -1){
         return gpioConfig;
     }
     const size_t capacity = gpioConfig.length() + 512;
     DynamicJsonDocument doc(capacity);
+    
+    Serial.print("Parsing File...  ");
     DeserializationError error = deserializeJson(doc, gpioConfig);
-    if (error)
-        Serial.println("file parsing failed!, falling back to default configs");
+    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
         
     JsonArray array = doc.as<JsonArray>();
     for(JsonVariant gpio : array) {
@@ -154,16 +161,17 @@ void initWireless(){
   /* 
    * initialize wifi/softAP based on the settings saved in wifi config file.
    */
-    File file = SPIFFS.open(WiFiConfigFile, "r");
-    if (!file)
-        Serial.println("file open failed!, falling back to default configs");
-        
+    Serial.print(String("Reading File: ") + WiFiConfigFile + "...  ");
+    File file = LittleFS.open(WiFiConfigFile, "r");
+    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+
     const size_t capacity = JSON_OBJECT_SIZE(5) + 240;
     DynamicJsonDocument doc(capacity);
+
+    Serial.print("Parsing File...  ");
     DeserializationError error = deserializeJson(doc, file);
-    if (error)
-        Serial.println("file parsing failed!, falling back to default configs");
-    
+    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
+
     const char* wifiMode = doc["mode"] | "AP";
     const char* wifi_name = doc["wifi_name"] | "iRWaRE";
     const char* wifi_password = doc["wifi_pass"] | "infrared.redefined";
@@ -176,19 +184,22 @@ void initWireless(){
     wirelessConfig.ap_ssid = ap_name;
     wirelessConfig.ap_psk = ap_pass;
     
+    file.close();
+
     if(strcmp(wifiMode,"WIFI") == 0){
       //config prefered as wifi
         WiFi.mode(WIFI_STA);
         WiFi.begin(wifi_name, wifi_password);
-        Serial.print("connecting to wifi network: ");
-        Serial.println(wifi_name);
-        Serial.print("using password: ");
-        Serial.println(wifi_password);
+
+        Serial.println(String("Connecting to wifi network \"") + wifi_name + "\" Using password: \"" + wifi_password + "\"");
+
         for(int i = 0; i < 40 ; i++){
             digitalWrite(LED,LOW);
             if(WiFi.status() == WL_CONNECTED){
+
                 Serial.println("WiFi Connection established...");
                 Serial.print("IP Address: ");Serial.println(WiFi.localIP());
+
                 delay(2000);
                 digitalWrite(LED,HIGH);
                 break;
@@ -202,8 +213,7 @@ void initWireless(){
     }if(strcmp(wifiMode, "AP") == 0 || WiFi.status() != WL_CONNECTED){
       //config prefered as softAP or wifi connection timed out 
         WiFi.mode(WIFI_AP);
-        Serial.print("Beginning SoftAP: ");
-        Serial.println(ap_name);
+        Serial.println(String("Beginning SoftAP \"") + ap_name + "\"");
         WiFi.softAP(ap_name, ap_pass, 1, 0,5);
         Serial.print("IP Address: ");Serial.println(WiFi.softAPIP());
         ledPulse(1000,2000,3);
@@ -224,26 +234,24 @@ void ledPulse(int _on, int _off, int _count){
 }
 
 void initUser(){
-    File file = SPIFFS.open(LoginCredential, "r");
-    const char* user;
-    const char* pass;
-    if (file){
-        const size_t capacity = JSON_OBJECT_SIZE(2) + 200;
-        DynamicJsonDocument doc(capacity);
-        DeserializationError error = deserializeJson(doc, file);
-        if (error)
-            Serial.println("file parsing failed!, falling back to default configs");
-            
-        user = doc["username"] | "iRWaRE";
-        pass = doc["password"] | "infrared.redefined";
-    }else{
-        Serial.println("file open failed!, falling back to default configs");
-        user = "iRWaRE";
-        pass = "infrared.redefined";
-    }
+    Serial.print(String("Reading File: ") + LoginCredential + "...  ");
+    File file = LittleFS.open(LoginCredential, "r");
+    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
 
+    const size_t capacity = JSON_OBJECT_SIZE(2) + 200;
+    DynamicJsonDocument doc(capacity);
+
+    Serial.print("Parsing File...  ");
+    DeserializationError error = deserializeJson(doc, file);
+    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
+
+    const char* user = doc["username"] | "iRWaRE";
+    const char* pass = doc["password"] | "infrared.redefined";
+    
     userConfig.user = user;
     userConfig.pass = pass;
+
+    file.close();    
 }
 
 void loop() {
@@ -284,16 +292,21 @@ void checkResetState(const int pinNumber){
         if(pinState == 0) return;
         pinState = digitalRead(pinNumber);
     }
-    SPIFFS.remove(WiFiConfigFile);
-    File file = SPIFFS.open(GPIOConfigFile, "w");
+    Serial.println("Confirmed, begin Reset...");
+    Serial.print(String("Clearing File: ") + GPIOConfigFile + "...  ");
+    File file = LittleFS.open(GPIOConfigFile, "w");  
+
     if (!file){
-        Serial.println(String(GPIOConfigFile) + " file open failed!");
+        Serial.println("Failed!");
     }else{
+        Serial.println("Done.");      
         file.print("[]");
         file.close();
     }
     setUser("iRWaRE", "infrared.redefined");
     setWireless("AP", "iRWaRE", "infrared.redefined");
+
+    Serial.println("Reset completed.");
 }
 
 String requestHandler(String request, WiFiClient client){
@@ -392,10 +405,11 @@ String getWireless(){
 }
 
 String setWireless(const char* wireless_mode,const char* wireless_name,const char* wireless_passwd){
-    SPIFFS.remove(WiFiConfigFile);
-    File file = SPIFFS.open(WiFiConfigFile, "w");
+    LittleFS.remove(WiFiConfigFile);
+    Serial.print(String("Writing File : ") + WiFiConfigFile);
+    File file = LittleFS.open(WiFiConfigFile, "w");
     if (!file){
-        Serial.println("file open failed!, falling back to default configs");
+        Serial.println(" Failed!, falling back to default configs.");
         return String("{\"response\":\"Config File Creation Failed\"}");
     }
         
@@ -417,18 +431,19 @@ String setWireless(const char* wireless_mode,const char* wireless_name,const cha
     }
 
     if (serializeJson(doc, file) == 0) {
-        Serial.println(F("Failed to write to file"));
+        Serial.println(" Failed, falling back to default configs.");
         file.close();
         return String("{\"response\":\"Config File Write Failed\"}");
     }
+    Serial.println(" Done.")
     file.close();
     wireless_updated = true;
     return String("{\"response\":\"Wireless config successfully applied\"}");
 }
 
 String setUser(const char* user_name,const char* passwd){
-    SPIFFS.remove(LoginCredential);
-    File file = SPIFFS.open(LoginCredential, "w");
+    LittleFS.remove(LoginCredential);
+    File file = LittleFS.open(LoginCredential, "w");
     if (!file)
         Serial.println("file open failed!, falling back to default configs");
         
@@ -550,7 +565,7 @@ bool authenticate(const char* username, const char* password){
 }
 
 String readFromFile(const char* file_path,String default_str){
-    File file = SPIFFS.open(file_path, "r");
+    File file = LittleFS.open(file_path, "r");
     if (!file) {
         Serial.println("file open failed!, falling back to default configs");
         return default_str;
