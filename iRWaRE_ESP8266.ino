@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
+#include <ArduinoOTA.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <IRrecv.h>
@@ -37,7 +38,8 @@ UserConfig userConfig;
 
 bool wireless_updated = false;
 
-const int port = 48321;
+const int socketPort = 48321;
+const int otaPort = 48325;
 const int recv_timeout = 8;    // seconds
 
 const int wirelessTimeout = 20;   // seconds
@@ -61,7 +63,7 @@ IRsend irsend(kIrLed);
 
 decode_results results;
 
-WiFiServer server(port);
+WiFiServer server(socketPort);
 
 void setup() {
    /*
@@ -72,7 +74,7 @@ void setup() {
     #else
         Serial.begin(kBaudRate, SERIAL_8N1);
     #endif
-    pinMode(LED,OUTPUT);
+    pinMode(LED, OUTPUT);
     LittleFS.begin();
     applyGPIO(-1, "", 0);
     initWireless();
@@ -82,6 +84,9 @@ void setup() {
     #endif
     irsend.begin();
     initUser();
+
+    ArduinoOTA.setPort(otaPort);
+    ArduinoOTA.begin();
 }
 
 void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue){
@@ -311,6 +316,9 @@ void loop() {
     */
 
     // checkResetState(4);
+
+    ArduinoOTA.handle();
+
     // Check for Socket Client
     WiFiClient client = server.available();
     // client will be null if socket client is not connected.
