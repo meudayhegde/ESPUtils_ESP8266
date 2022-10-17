@@ -1,16 +1,17 @@
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
-#include <ArduinoOTA.h>
-#include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <ArduinoOTA.h>
+#include <ESP8266WiFi.h>
+#include <IRac.h>
 #include <IRrecv.h>
 #include <IRremoteESP8266.h>
-#include <IRac.h>
 #include <IRtext.h>
 #include <IRutils.h>
+#include <LittleFS.h>
 
 #define LEGACY_TIMING_INFO false
 #define LED 02
+#define SERIAL_MONITOR_ENABLED true
 
 const char* WiFiConfigFile = "/WiFiConfig.json";
 const char* LoginCredential = "/LoginCredential.json";
@@ -65,6 +66,30 @@ decode_results results;
 
 WiFiServer server(socketPort);
 
+// Function prototypes
+void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue);
+bool authenticate(const char* username, const char* password);
+void checkResetState(const int pinNumber);
+String generateIrResult(const decode_results * const results);
+String getGPIO(const int pinNumber);
+uint64_t getUInt64fromHex(char const *hex);
+String getWireless();
+void initUser();
+void initWireless();
+String irCapture(bool multiCapture, WiFiClient client);
+String irSend(uint16_t size, const char* protocol_str, const char* irData);
+void ledPulse(int _on, int _off, int _count);
+void loop();
+void printSerial(const char* serial, const char* end = "\n");
+void printSerial(const String serial, const char* end = "\n");
+String requestHandler(String request, WiFiClient client);
+bool sendIrState(uint16_t size, decode_type_t protocol, const char* data);
+bool sendIrValue(uint16_t size, decode_type_t protocol, const char* irData);
+void sendRawArray(uint16_t size, const char* irData);
+void setup();
+String setUser(const char* user_name,const char* passwd);
+String setWireless(const char* wireless_mode, const char* wireless_name, const char* wireless_passwd);
+
 void setup() {
    /*
     * Startup instructions.
@@ -74,17 +99,32 @@ void setup() {
     #else
         Serial.begin(kBaudRate, SERIAL_8N1);
     #endif
+    
+    printSerial("## Set Board Indicator.");
     pinMode(LED, OUTPUT);
+
+    printSerial("## Begin flash storage.");
     LittleFS.begin();
+
+    printSerial("## Apply GPIO settings.");
     applyGPIO(-1, "", 0);
+
+    printSerial("## Begin wireless network.");
     initWireless();
+
+    printSerial("## Begin TCP socket server.");
     server.begin();
+
     #if DECODE_HASH
         irrecv.setUnknownThreshold(kMinUnknownSize);
     #endif
+    printSerial("## Begin IR Sender lib.");
     irsend.begin();
+
+    printSerial("## Load user credentials.");
     initUser();
 
+    printSerial("## Begin ArduinoOTA service.");
     ArduinoOTA.setPort(otaPort);
     ArduinoOTA.begin();
 }
@@ -96,10 +136,10 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
     * if GPIOPinNumber == -1, apply the stored settings for all the GPIO pins.
     */
   
-    Serial.print(String("Reading File: ") + GPIOConfigFile + "...  ");
+    printSerial(String("Reading File: ") + GPIOConfigFile, "...  ");
     // open config file 
     File file = LittleFS.open(GPIOConfigFile, "r");    
-    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+    printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
 
     // read config file.
     // structure: [{"pinNumber": 2, "pinMode": "OUTPUT", "pinValue": 0},...]
@@ -107,10 +147,10 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
     const size_t capacity = gpioConfig.length() + 512;
     DynamicJsonDocument doc(capacity);
 
-    Serial.print("Parsing File...  ");    
+    printSerial("Parsing File...  ", "");    
     // parse config file to doc as JSONObject.
     DeserializationError error = deserializeJson(doc, gpioConfig);
-    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
+    printSerial((error)? "Failed!, falling back to default configs." : "Done.");
 
     JsonArray array = doc.as<JsonArray>();
     bool pinConfExist = false;
@@ -153,12 +193,13 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
     
     if(file) file.close();
     
-    Serial.print(String("Writing File: ") + GPIOConfigFile + "...  ");
+    printSerial(String("Writing File: ") + GPIOConfigFile, "...  ");
     file = LittleFS.open(GPIOConfigFile, "w");  
-    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+    printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
 
     // Save the updated content as file.
     serializeJson(doc, file);
+    if(file) file.close();
 }
 
 String getGPIO(const int pinNumber){
@@ -166,9 +207,9 @@ String getGPIO(const int pinNumber){
     * return JSONObject corresponding to pinNumber.
     * if pinNumber == -1, return JSONArray of all JSONObjects
     */
-    Serial.print(String("Reading File: ") + GPIOConfigFile + "...  ");
+    printSerial(String("Reading File: ") + GPIOConfigFile, "...  ");
     File file = LittleFS.open(GPIOConfigFile, "r"); 
-    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+    printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
     
     // read config file
     String gpioConfig = file.readStringUntil(']') + "]";
@@ -179,10 +220,10 @@ String getGPIO(const int pinNumber){
     const size_t capacity = gpioConfig.length() + 512;
     DynamicJsonDocument doc(capacity);
     
-    Serial.print("Parsing File...  ");
+    printSerial("Parsing File...  ", " ");
     // parse config file to doc as JSONObject
     DeserializationError error = deserializeJson(doc, gpioConfig);
-    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
+    printSerial((error)? "Failed!, falling back to default configs." : "Done.");
     
     // traverse through each JSONObject, each JSONObject is config of a certain GPIO Pin
     JsonArray array = doc.as<JsonArray>();
@@ -206,17 +247,17 @@ void initWireless(){
     * WiFiConfigFIle structure: {"mode":"WIFI","wifi_name":"myWiFiName","wifi_pass":"myWiFiPassword","ap_name":"myApName","ap_pass":"myAPPassword"}
     * mode : WIFI / AP
     */
-    Serial.print(String("Reading File: ") + WiFiConfigFile + "...  ");
+    printSerial(String("Reading File: ") + WiFiConfigFile, "...  ");
     File file = LittleFS.open(WiFiConfigFile, "r");
-    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+    printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
 
     const size_t capacity = JSON_OBJECT_SIZE(5) + 240;
     DynamicJsonDocument doc(capacity);
 
-    Serial.print("Parsing File...  ");
+    printSerial("Parsing File...  ", " ");
     // parse WiFiConfigFile to doc as JSONObject
     DeserializationError error = deserializeJson(doc, file);
-    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
+    printSerial((error)? "Failed!, falling back to default configs." : "Done.");
 
     const char* wifiMode = doc["mode"] | defaultMode;
     const char* wifi_name = doc["wifi_name"] | defaultName;
@@ -237,34 +278,36 @@ void initWireless(){
         // begin wifi connection.
         WiFi.begin(wifi_name, wifi_password);
 
-        Serial.println(String("Connecting to wifi network \"") + wifi_name + "\" Using password: \"" + wifi_password + "\"");
+        printSerial(String("Connecting to wifi network \"") + wifi_name + "\" Using password: \"" + wifi_password + "\"");
 
         for(int i = 0; i < wirelessTimeout * 2 ; i++){
             digitalWrite(LED, LOW);
 
             // check wifi connection status
             if(WiFi.status() == WL_CONNECTED){
-                Serial.println("WiFi Connection established...");
-                Serial.print("IP Address: ");Serial.println(WiFi.localIP());
+                printSerial("WiFi Connection established...");
+                printSerial("IP Address: ");
+                if(SERIAL_MONITOR_ENABLED) Serial.println(WiFi.localIP());
                 delay(2000);
                 digitalWrite(LED, HIGH);
                 break;
             }
             
             // Delay 500 milli-seconds            
-            Serial.print(".");delay(50);
+            printSerial(".", ".");delay(50);
             digitalWrite(LED, HIGH);
             delay(450);
         }
-        Serial.println();        
+        printSerial(".");        
     }
     
     // begin AP if config stored as softAP or wifi connection timed out.
     if(strcmp(wifiMode, "AP") == 0 || WiFi.status() != WL_CONNECTED){
         WiFi.mode(WIFI_AP);
-        Serial.println(String("Beginning SoftAP \"") + ap_name + "\"");
+        printSerial(String("Beginning SoftAP \"") + ap_name, "\"");
         WiFi.softAP(ap_name, ap_pass, 1, 0, 5);
-        Serial.print("IP Address: ");Serial.println(WiFi.softAPIP());
+        printSerial("IP Address:", " ");
+        if(SERIAL_MONITOR_ENABLED) Serial.println(WiFi.softAPIP());
         ledPulse(1000,2000,3);
     }
 }
@@ -277,29 +320,29 @@ void ledPulse(int _on, int _off, int _count){
     */
     int count = 0;
     while(count<_count){
-        Serial.print(".");
+        printSerial(".", ".");
         digitalWrite(LED, LOW);  delay(_on);
         digitalWrite(LED, HIGH);  delay(_off);
         count++;
     }
-    Serial.println();
+    printSerial(".");
 }
 
 void initUser(){
    /*
     * Load username and user password from storage.
     */
-    Serial.print(String("Reading File: ") + LoginCredential + "...  ");
+    printSerial(String("Reading File: ") + LoginCredential, "...  ");
     File file = LittleFS.open(LoginCredential, "r");
-    Serial.println((!file)? " Failed!, falling back to default configs." : " Done.");
+    printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
 
     const size_t capacity = JSON_OBJECT_SIZE(2) + 200;
     DynamicJsonDocument doc(capacity);
 
-    Serial.print("Parsing File...  ");
+    printSerial("Parsing File...", "  ");
     // parse config file.
     DeserializationError error = deserializeJson(doc, file);
-    Serial.println((error)? "Failed!, falling back to default configs." : "Done.");
+    printSerial((error)? "Failed!, falling back to default configs." : "Done.");
 
     const char* user = doc["username"] | defaultName;
     const char* pass = doc["password"] | defaultPassword;
@@ -324,7 +367,8 @@ void loop() {
     // client will be null if socket client is not connected.
     if (client) {
         if(client.connected()){
-            Serial.print("Client Connected, client IP: "); Serial.println(client.remoteIP());
+            printSerial("Client Connected, client IP:", " ");
+            if(SERIAL_MONITOR_ENABLED) Serial.println(client.remoteIP());
         }
         while(client.connected()){      
             while(client.available()){
@@ -335,7 +379,7 @@ void loop() {
                 client.stop();
             }
         }
-        Serial.println("Client disconnected");    
+        printSerial("Client disconnected.");    
     }
     if(wireless_updated){
         initWireless();
@@ -353,7 +397,7 @@ void checkResetState(const int pinNumber){
     uint32_t start_time = millis();
     int cur_time = 0;
     if(pinState == 1){
-        Serial.println("Reset button clicked, will reset config if reset button is kept on hold for 10 seconds");
+        printSerial("Reset button clicked, will reset config if reset button is kept on hold for 10 seconds");
     }
     int count = 0;
     while(cur_time < 10){
@@ -361,21 +405,21 @@ void checkResetState(const int pinNumber){
         if(pinState == 0) return;
         pinState = digitalRead(pinNumber);
     }
-    Serial.println("Confirmed, begin Reset...");
-    Serial.print(String("Clearing File: ") + GPIOConfigFile + "...  ");
+    printSerial("Confirmed, begin Reset...");
+    printSerial(String("Clearing File: ") + GPIOConfigFile, "...  ");
     File file = LittleFS.open(GPIOConfigFile, "w");  
 
     if (!file){
-        Serial.println("Failed!");
+        printSerial("Failed!");
     }else{
-        Serial.println("Done.");      
+        printSerial("Done.");      
         file.print("[]");
         file.close();
     }
     setUser(defaultName, defaultPassword);
     setWireless(defaultMode, defaultName, defaultPassword);
 
-    Serial.println("Reset completed.");
+    printSerial("Reset completed.");
 }
 
 String requestHandler(String request, WiFiClient client){
@@ -388,19 +432,20 @@ String requestHandler(String request, WiFiClient client){
         return String("{\"response\":\"request length exceeded the limit!!\"}");
     
     DynamicJsonDocument doc(capacity);
-    Serial.print("Parsing request from socket client...  ");
+    printSerial("Parsing request from socket client...", "  ");
     DeserializationError error = deserializeJson(doc, request.c_str());
     if (error){
-        Serial.println("Failed.");
+        printSerial("Failed.");
         return String("{\"response\":\"JSON Error, failed to parse the request\"}");
     }
-    Serial.println("Done.");
+    printSerial("Done.");
     
     const char* req = doc["request"] | "undefined";
     const char* username = doc["username"] | "";
     const char* password = doc["password"] | "";
 
-    Serial.print("Incomming request: "); Serial.println(req);
+    printSerial("Incomming request:", " ");
+    printSerial(req);
 
     if(strcmp(req, "undefined") == 0){
         return String("{\"response\":\"Purpose not defined\"}");
@@ -520,13 +565,13 @@ String setWireless(const char* wireless_mode, const char* wireless_name, const c
     * wireless_mode: WIFI / AP
     */  
     LittleFS.remove(WiFiConfigFile);
-    Serial.print(String("Writing File : ") + WiFiConfigFile);
+    printSerial(String("Writing File : ") + WiFiConfigFile, " ");
     File file = LittleFS.open(WiFiConfigFile, "w");
     if (!file){
-        Serial.println(" Failed!, falling back to default configs.");
+        printSerial(" Failed!, falling back to default configs.");
         return String("{\"response\":\"Config File Creation Failed\"}");
     }
-        
+
     const size_t capacity = JSON_OBJECT_SIZE(5) + 240;
     DynamicJsonDocument doc(capacity);
     
@@ -548,11 +593,11 @@ String setWireless(const char* wireless_mode, const char* wireless_name, const c
 
     // save new configuration to WiFiConfigFile
     if (serializeJson(doc, file) == 0) {
-        Serial.println(" Failed, falling back to default configs.");
+        printSerial(" Failed, falling back to default configs.");
         if(file) file.close();
         return String("{\"response\":\"Config File Write Failed\"}");
     }
-    Serial.println(" Done.");
+    printSerial(" Done.");
     if(file) file.close();
     wireless_updated = true;
     return String("{\"response\":\"Wireless config successfully applied\"}");
@@ -564,21 +609,21 @@ String setUser(const char* user_name,const char* passwd){
     */   
     
     LittleFS.remove(LoginCredential);
-    Serial.print(String("Writing File: ") + LoginCredential);
+    printSerial(String("Writing File: ") + LoginCredential, " ");
     File file = LittleFS.open(LoginCredential, "w");
     if (!file)
-        Serial.println("Failed!, falling back to default configs");
+        printSerial("Failed!, falling back to default configs");
         
     const size_t capacity = JSON_OBJECT_SIZE(2) + 100;
     DynamicJsonDocument doc(capacity);
     doc["username"] = user_name;
     doc["password"] = passwd;
     if (serializeJson(doc, file) == 0) {
-        Serial.println("Failed!, falling back to default configs");
+        printSerial("Failed!, falling back to default configs");
         if(file) file.close();
         return String("{\"response\":\"Config File Write Failed\"}");
     }
-    Serial.println("  Done.");
+    printSerial("  Done.");
     if(file) file.close();
     initUser();
     return String("{\"response\":\"User config successfully applied\"}");
@@ -592,7 +637,7 @@ String generateIrResult(const decode_results * const results){
     uint16_t size = results->bits;
     
     irrecv.disableIRIn();
-    Serial.println(typeToString(protocol));
+    printSerial(typeToString(protocol));
     String output = String("{\"response\":\"success\",\"protocol\":\"") + typeToString(protocol) + "\",\"length\":\"";
     if (protocol == decode_type_t::UNKNOWN) {
         output += uint64ToString(getCorrectedRawLength(results), 16);
@@ -634,7 +679,7 @@ String irCapture(bool multiCapture, WiFiClient client){
     * Captire signal from IR Remote control and return IR data.
     * capture more than one signal if multicapture is true.
     */
-    Serial.println("beginning ir capture procedure" );
+    printSerial("Beginning ir capture procedure" );
     irrecv.enableIRIn();
     String result = "{\"response\":\"timeout\"}";
     uint32_t start_time = millis();
@@ -645,7 +690,7 @@ String irCapture(bool multiCapture, WiFiClient client){
     temp += "}";
     client.println(temp);
     client.flush();
-    Serial.println(String("start time: ") + start_time);
+    printSerial(String("start time: ") + start_time);
     int count = 0;
     while((cur_val < recv_timeout) && client.connected()){
         cur_val = (millis() - start_time) / 1000;
@@ -693,8 +738,6 @@ bool authenticate(const char* username, const char* password){
    /*
     * check authenticity of username and password
     */
-    Serial.println(userConfig.user);
-    Serial.println(userConfig.pass);
     return (userConfig.user == username && userConfig.pass == password );
 }
 
@@ -743,7 +786,7 @@ bool sendIrState(uint16_t size, decode_type_t protocol, const char* data){
     const size_t capacity = JSON_ARRAY_SIZE(size) + (6 * size);
     DynamicJsonDocument doc(capacity);
     deserializeJson(doc, stateListString.c_str());
-    Serial.println(stateListString);
+    printSerial(stateListString);
     uint8_t stateList[size];
     for(int i = 0; i < size; i++){
         const char* hexStr = doc[i];
@@ -764,4 +807,18 @@ uint64_t getUInt64fromHex(char const *hex) {
         result += c - (isdigit(c)? '0': ((isupper(c)? 'A' : 'a') + 10));
     }
     return result;
+}
+
+void printSerial(const String serial, const char* end){
+    if(SERIAL_MONITOR_ENABLED){
+        Serial.print(serial);
+        Serial.print(end);        
+    }
+}
+
+void printSerial(const char* serial, const char* end){
+    if(SERIAL_MONITOR_ENABLED){
+        Serial.print(serial);
+        Serial.print(end);        
+    }
 }
