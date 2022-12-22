@@ -64,10 +64,10 @@ IRsend irsend(kIrLed);
 
 decode_results results;
 
-WiFiServer server(socketPort);
+WiFiServer socketServer(socketPort);
 
 // Function prototypes
-void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue);
+String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue);
 bool authenticate(const char* username, const char* password);
 void checkResetState(const int pinNumber);
 String generateIrResult(const decode_results * const results);
@@ -80,8 +80,8 @@ String irCapture(bool multiCapture, WiFiClient client);
 String irSend(uint16_t size, const char* protocol_str, const char* irData);
 void ledPulse(int _on, int _off, int _count);
 void loop();
-void printSerial(const char* serial, const char* end = "\n");
-void printSerial(const String serial, const char* end = "\n");
+size_t printSerial(const char* serial, const char* end = "\n");
+size_t printSerial(const String serial, const char* end = "\n");
 String requestHandler(String request, WiFiClient client);
 bool sendIrState(uint16_t size, decode_type_t protocol, const char* data);
 bool sendIrValue(uint16_t size, decode_type_t protocol, const char* irData);
@@ -113,7 +113,7 @@ void setup() {
     initWireless();
 
     printSerial("## Begin TCP socket server.");
-    server.begin();
+    socketServer.begin();
 
     #if DECODE_HASH
         irrecv.setUnknownThreshold(kMinUnknownSize);
@@ -125,15 +125,33 @@ void setup() {
     initUser();
 
     printSerial("## Begin ArduinoOTA service.");
+    ArduinoOTA.onStart([]() {
+        printSerial("## Begin OTA Update process.");
+    });
+    ArduinoOTA.onEnd([]() {
+        printSerial("\n## OTA Update process End.");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        if(SERIAL_MONITOR_ENABLED) Serial.printf("==> Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        if(SERIAL_MONITOR_ENABLED) Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) printSerial("OTA Auth Failed");
+        else if (error == OTA_BEGIN_ERROR) printSerial("OTA Begin Failed");
+        else if (error == OTA_CONNECT_ERROR) printSerial("OTA Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR) printSerial("OTA Receive Failed");
+        else if (error == OTA_END_ERROR) printSerial("OTA End Failed");
+    });
     ArduinoOTA.setPort(otaPort);
     ArduinoOTA.begin();
 }
 
-void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue){
+String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue){
    /*
     * Apply GPIOPinMode and GPIOPinValue for gpio GPIOPinNumber.
     * add/update GPIO settings for GPIOPinNumber and store in GPIOConfigFile.
     * if GPIOPinNumber == -1, apply the stored settings for all the GPIO pins.
+    * if GPIOPinValue == -1, toggle pinValue based on stored value.
     */
   
     printSerial(String("Reading File: ") + GPIOConfigFile, "...  ");
@@ -155,15 +173,18 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
     JsonArray array = doc.as<JsonArray>();
     bool pinConfExist = false;
 
+    int retPinVal = -1;
+
     // traverse through each JSONObject, each JSONObject is config of a certain GPIO Pin
     for(JsonVariant gpio : array) {
         const int pin = gpio["pinNumber"];
+        const int pinVal = gpio["pinValue"];
 
         // update settings for GPIOPinNumber.
         if(GPIOPinNumber != -1 && pin == GPIOPinNumber){
             gpio["pinNumber"] = GPIOPinNumber;
             gpio["pinMode"] = GPIOPinMode;
-            gpio["pinValue"] = GPIOPinValue;
+            gpio["pinValue"] = (GPIOPinValue == -1)? ((pinVal == LOW)? HIGH: LOW): GPIOPinValue;
         }
         
         // if GPIOPinNumber == -1, apply the stored settings for all the GPIO pins.
@@ -176,6 +197,7 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
                 pinMode(pin, OUTPUT);
                 digitalWrite(pin, PinValue);
             }
+            retPinVal = PinValue;
         }
     }
 
@@ -200,6 +222,10 @@ void applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOP
     // Save the updated content as file.
     serializeJson(doc, file);
     if(file) file.close();
+    String ret = String("{\"response\": \"success\", \"pinValue\":");
+    ret += retPinVal;
+    ret += "}";
+    return ret;
 }
 
 String getGPIO(const int pinNumber){
@@ -363,7 +389,7 @@ void loop() {
     ArduinoOTA.handle();
 
     // Check for Socket Client
-    WiFiClient client = server.available();
+    WiFiClient client = socketServer.available();
     // client will be null if socket client is not connected.
     if (client) {
         if(client.connected()){
@@ -525,8 +551,7 @@ String requestHandler(String request, WiFiClient client){
             const int GPIOPinNumber = doc["pinNumber"];
             const char* GPIOPinMode = doc["pinMode"];
             const int GPIOPinValue = doc["pinValue"];
-            applyGPIO(GPIOPinNumber, GPIOPinMode, GPIOPinValue);
-            return String("{\"response\": \"success\"}");
+            return applyGPIO(GPIOPinNumber, GPIOPinMode, GPIOPinValue);
         }else return String("{\"response\":\"deny\"}");
     }
     
@@ -738,7 +763,7 @@ bool authenticate(const char* username, const char* password){
    /*
     * check authenticity of username and password
     */
-    return (userConfig.user == username && userConfig.pass == password );
+    return (userConfig.user == username && userConfig.pass == password);
 }
 
 String irSend(uint16_t size, const char* protocol_str, const char* irData){
@@ -809,16 +834,10 @@ uint64_t getUInt64fromHex(char const *hex) {
     return result;
 }
 
-void printSerial(const String serial, const char* end){
-    if(SERIAL_MONITOR_ENABLED){
-        Serial.print(serial);
-        Serial.print(end);        
-    }
+size_t printSerial(const String serial, const char* end){
+    return SERIAL_MONITOR_ENABLED ? Serial.print(serial) + Serial.print(end) : 0;        
 }
 
-void printSerial(const char* serial, const char* end){
-    if(SERIAL_MONITOR_ENABLED){
-        Serial.print(serial);
-        Serial.print(end);        
-    }
+size_t printSerial(const char* serial, const char* end){
+    return SERIAL_MONITOR_ENABLED ? Serial.print(serial) + Serial.print(end) : 0; 
 }
