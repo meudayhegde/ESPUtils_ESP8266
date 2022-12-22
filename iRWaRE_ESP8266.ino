@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
+#include <WiFiUdp.h>
 #include <IRac.h>
 #include <IRrecv.h>
 #include <IRremoteESP8266.h>
@@ -39,16 +40,19 @@ UserConfig userConfig;
 
 bool wireless_updated = false;
 
-const int socketPort = 48321;
-const int otaPort = 48325;
-const int recv_timeout = 8;    // seconds
+const uint16_t socketPort = 48321;
+const uint16_t otaPort = 48325;
+const uint16_t udpPortLocal = 48327;
+const uint16_t udpPortRemote = 48326;
 
-const int wirelessTimeout = 20;   // seconds
+const uint8_t recv_timeout = 8;    // seconds
 
-const int maxRequestLength = 5120;
+const uint8_t wirelessTimeout = 20;   // seconds
 
-const uint16_t kRecvPin = 14;
-const uint16_t kIrLed = 4;
+const uint16_t maxRequestLength = 5120;
+
+const uint8_t kRecvPin = 14;
+const uint8_t kIrLed = 4;
 
 const uint32_t kBaudRate = 115200;
 const uint16_t kCaptureBufferSize = 1024;
@@ -57,7 +61,9 @@ const uint8_t kTimeout = 50;  // Milli-Seconds
 
 const uint16_t kFrequency = 38000;
 
-const uint16_t kMinUnknownSize = 12;
+const uint8_t kMinUnknownSize = 12;
+
+const uint16_t udpPacketSize = 255;
 
 IRrecv irrecv(kRecvPin, kCaptureBufferSize, kTimeout, true);
 IRsend irsend(kIrLed);
@@ -65,6 +71,7 @@ IRsend irsend(kIrLed);
 decode_results results;
 
 WiFiServer socketServer(socketPort);
+WiFiUDP UDP;
 
 // Function prototypes
 String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue);
@@ -74,6 +81,8 @@ String generateIrResult(const decode_results * const results);
 String getGPIO(const int pinNumber);
 uint64_t getUInt64fromHex(char const *hex);
 String getWireless();
+void handleDatagram();
+void handleSocket();
 void initUser();
 void initWireless();
 String irCapture(bool multiCapture, WiFiClient client);
@@ -144,6 +153,9 @@ void setup() {
     });
     ArduinoOTA.setPort(otaPort);
     ArduinoOTA.begin();
+
+    printSerial(String("## Begin UDP on port: ") + udpPortLocal);
+    UDP.begin(udpPortLocal);
 }
 
 String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue){
@@ -387,7 +399,45 @@ void loop() {
     // checkResetState(4);
 
     ArduinoOTA.handle();
+    handleDatagram();
+    handleSocket();
+    if(wireless_updated){
+        initWireless();
+        wireless_updated = false;
+    }
+}
 
+void handleDatagram(){
+    char packet[udpPacketSize];
+    int packetSize = UDP.parsePacket();
+    if(packetSize){
+        int len = UDP.read(packet, udpPacketSize);
+        if (len > 0){
+            packet[len] = '\0';
+        }
+        const size_t capacity = JSON_OBJECT_SIZE(1) + 128;
+        DynamicJsonDocument doc(capacity);
+        printSerial("Parsing request from udp client...");
+        DeserializationError error = deserializeJson(doc, packet);
+        if (error){
+            printSerial("Failed, abort operation.");
+            return;
+        }
+        printSerial("Done.");
+        
+        const char* req = doc["request"] | "undefined";
+        
+        if(strcmp(req, "ping") == 0){
+            String response = String("{\"MAC\":\"") + WiFi.macAddress() + "\"}";
+            UDP.beginPacket(UDP.remoteIP(), udpPortRemote);
+            UDP.write(response.c_str());
+            UDP.endPacket();
+        }
+        else printSerial("request not identified, abort.");
+    }
+}
+
+void handleSocket(){
     // Check for Socket Client
     WiFiClient client = socketServer.available();
     // client will be null if socket client is not connected.
@@ -406,10 +456,6 @@ void loop() {
             }
         }
         printSerial("Client disconnected.");    
-    }
-    if(wireless_updated){
-        initWireless();
-        wireless_updated = false;
     }
 }
 
