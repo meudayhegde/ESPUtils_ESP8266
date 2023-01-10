@@ -19,8 +19,8 @@ const char* LoginCredential = "/LoginCredential.json";
 const char* GPIOConfigFile = "/GPIOConfig.json";
 
 const char* defaultMode = "AP"; // AP / WIFI
-const char* defaultName = "iRWaRE";
-const char* defaultPassword = "infrared.redefined";
+const char* deviceName = "ESPUtils";
+const char* devicePassword = "ESP.device@8266";
 
 struct UserConfig{
     String user;
@@ -42,8 +42,8 @@ bool wireless_updated = false;
 
 const uint16_t socketPort = 48321;
 const uint16_t otaPort = 48325;
-const uint16_t udpPortLocal = 48327;
-const uint16_t udpPortRemote = 48326;
+const uint16_t udpPortESP = 48327;
+const uint16_t udpPortApp = 48326;
 
 const uint8_t recv_timeout = 8;    // seconds
 
@@ -83,7 +83,7 @@ uint64_t getUInt64fromHex(char const *hex);
 String getWireless();
 void handleDatagram();
 void handleSocket();
-void initUser();
+void initCredentials();
 void initWireless();
 String irCapture(bool multiCapture, WiFiClient client);
 String irSend(uint16_t size, const char* protocol_str, const char* irData);
@@ -96,7 +96,7 @@ bool sendIrState(uint16_t size, decode_type_t protocol, const char* data);
 bool sendIrValue(uint16_t size, decode_type_t protocol, const char* irData);
 void sendRawArray(uint16_t size, const char* irData);
 void setup();
-String setUser(const char* user_name,const char* passwd);
+String setCredentials(const char* user_name,const char* passwd);
 String setWireless(const char* wireless_mode, const char* wireless_name, const char* wireless_passwd);
 
 void setup() {
@@ -131,7 +131,7 @@ void setup() {
     irsend.begin();
 
     printSerial("## Load user credentials.");
-    initUser();
+    initCredentials();
 
     printSerial("## Begin ArduinoOTA service.");
     ArduinoOTA.onStart([]() {
@@ -154,8 +154,8 @@ void setup() {
     ArduinoOTA.setPort(otaPort);
     ArduinoOTA.begin();
 
-    printSerial(String("## Begin UDP on port: ") + udpPortLocal);
-    UDP.begin(udpPortLocal);
+    printSerial(String("## Begin UDP on port: ") + udpPortESP);
+    UDP.begin(udpPortESP);
 }
 
 String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue){
@@ -298,10 +298,10 @@ void initWireless(){
     printSerial((error)? "Failed!, falling back to default configs." : "Done.");
 
     const char* wifiMode = doc["mode"] | defaultMode;
-    const char* wifi_name = doc["wifi_name"] | defaultName;
-    const char* wifi_password = doc["wifi_pass"] | defaultPassword;
-    const char* ap_name = doc["ap_name"] | defaultName;
-    const char* ap_pass = doc["ap_pass"] | defaultPassword;
+    const char* wifi_name = doc["wifi_name"] | deviceName;
+    const char* wifi_password = doc["wifi_pass"] | devicePassword;
+    const char* ap_name = doc["ap_name"] | deviceName;
+    const char* ap_pass = doc["ap_pass"] | devicePassword;
 
     wirelessConfig.wireless_mode = wifiMode;
     wirelessConfig.station_ssid = wifi_name;
@@ -366,7 +366,7 @@ void ledPulse(int _on, int _off, int _count){
     printSerial(".");
 }
 
-void initUser(){
+void initCredentials(){
    /*
     * Load username and user password from storage.
     */
@@ -382,8 +382,8 @@ void initUser(){
     DeserializationError error = deserializeJson(doc, file);
     printSerial((error)? "Failed!, falling back to default configs." : "Done.");
 
-    const char* user = doc["username"] | defaultName;
-    const char* pass = doc["password"] | defaultPassword;
+    const char* user = doc["username"] | deviceName;
+    const char* pass = doc["password"] | devicePassword;
     
     userConfig.user = user;
     userConfig.pass = pass;
@@ -423,15 +423,18 @@ void handleDatagram(){
             printSerial("Failed, abort operation.");
             return;
         }
-        printSerial("Done.");
         
         const char* req = doc["request"] | "undefined";
-        
+        IPAddress remoteIP = UDP.remoteIP();
+        printSerial(String("request from ") + remoteIP.toString() + ": " + req);
+
         if(strcmp(req, "ping") == 0){
-            String response = String("{\"MAC\":\"") + WiFi.macAddress() + "\"}";
-            UDP.beginPacket(UDP.remoteIP(), udpPortRemote);
-            UDP.write(response.c_str());
+            String response = String("{\"MAC\": \"") + WiFi.macAddress() + "\"}";
+            UDP.beginPacket(remoteIP, udpPortApp);          
+            UDP.print(response);
             UDP.endPacket();
+            printSerial("response: ", response.c_str());
+            printSerial("");
         }
         else printSerial("request not identified, abort.");
     }
@@ -488,8 +491,8 @@ void checkResetState(const int pinNumber){
         file.print("[]");
         file.close();
     }
-    setUser(defaultName, defaultPassword);
-    setWireless(defaultMode, defaultName, defaultPassword);
+    setCredentials(deviceName, devicePassword);
+    setWireless(defaultMode, deviceName, devicePassword);
 
     printSerial("Reset completed.");
 }
@@ -580,7 +583,7 @@ String requestHandler(String request, WiFiClient client){
         if(authenticate(username, password)){
             const char* user = doc["new_username"] | username;
             const char* pass = doc["new_password"] | password;
-            return setUser(user, pass);
+            return setCredentials(user, pass);
         }else return String("{\"response\":\"deny\"}");
     }
     
@@ -619,6 +622,7 @@ String requestHandler(String request, WiFiClient client){
     else{
         return String("{\"response\":\"Invalid Purpose\"}");
     }
+    return String("{\"response\":\"operation complete\"}");    
 }
 
 String getWireless(){
@@ -674,7 +678,7 @@ String setWireless(const char* wireless_mode, const char* wireless_name, const c
     return String("{\"response\":\"Wireless config successfully applied\"}");
 }
 
-String setUser(const char* user_name,const char* passwd){
+String setCredentials(const char* user_name,const char* passwd){
    /*
     * set new username and user password
     */   
@@ -696,7 +700,7 @@ String setUser(const char* user_name,const char* passwd){
     }
     printSerial("  Done.");
     if(file) file.close();
-    initUser();
+    initCredentials();
     return String("{\"response\":\"User config successfully applied\"}");
 }
 
