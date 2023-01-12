@@ -810,7 +810,7 @@ String irCapture(bool multiCapture, WiFiClient client){
 }
 
 bool authenticate(const char* username, const char* password){
-   /*
+   /**
     * check authenticity of username and password
     */
     return (userConfig.user == username && userConfig.pass == password);
