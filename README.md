@@ -10,12 +10,15 @@
 [![status](https://img.shields.io/badge/ArduinoJson-6.20.0-blue.svg)](https://arduinojson.org/v6/doc/)
 [![status](https://img.shields.io/badge/IRremoteESP8266-2.8.4-blue.svg)](https://github.com/crankyoldgit/IRremoteESP8266)
 
+### Releases
+[![DOWNLOAD](https://img.shields.io/badge/Downloads-1.0.0_alpha-darkgreen.svg)](https://github.com/meudayhegde/ESPUtils_ESP8266/releases/tag/release-1.0.0-alpha)
+
 #### Android interface: [ESP Utils Android application](https://github.com/meudayhegde/ESPUtils_android)
 
 `This module is to be installed on ESP8266 / ESP32 Device.`
 #### Features
-- [ ] `Wireless switch: Can be used as wireless switch through android app connected by wifi network.`
-- [ ] `Wireless Infrared Controller: Infrared controllers can be captured and remodeled on android application.`
+- `Wireless switch: Can be used as wireless switch through android app connected by wifi network.`
+- `Wireless Infrared Controller: Infrared controllers can be captured and remodeled on android application.`
 
 ## How to install
 ### Method 1: Through Arduino IDE
@@ -24,3 +27,11 @@
 3. [**Download This Project**](https://github.com/meudayhegde/ESPUtils_ESP8266.git) (or using git clone). Extract and open the project on Arduino ide.
 4. Follow the procedure and upload the sketch on to your ESP Device.
 5. And Done. you can start configuring the device using [**ESP Utils Android application**](https://github.com/meudayhegde/ESPUtils_android)
+### Method 2: Using esptool
+1. Install python3 from <b>[python.org](https://www.python.org/downloads)</b>
+2. Install module <b>esptool</b><br>```python3 -m pip install esptool```
+3. Install USB Driver (CH340G/CP2102 or other appropriate driver depending on serial to usb converter used) if not installed.
+4. Download system bin file from <b>[Releases](https://github.com/meudayhegde/ESPUtils_ESP8266/releases)</b>
+5. Connect ESP Device via USB and execute command, <br>
+```python3 -m esptool --port PORT write_flash 0x00000 path_to_ESPUtils_ESPxxxxx_xx.xx.bin``` <br> usual value for PORT on windows is COM8, for Linux /dev/ttyUSB0
+
