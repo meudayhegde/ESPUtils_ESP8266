@@ -2,8 +2,8 @@
 `arduino code for ESP Utils project, utilities for ESP8266 and ESP32.`
 
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/9f2e4183d2a341398ac1fc88ed7a0788)](https://www.codacy.com/gh/meudayhegde/ESPUtils_ESP8266/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=meudayhegde/ESPUtils_ESP8266&amp;utm_campaign=Badge_Grade) 
-[![version](https://img.shields.io/badge/version-1.0-blue.svg)](https://github.com/meudayhegde/ESPUtils_ESP8266)
-[![status](https://img.shields.io/badge/status-beta-gold.svg)](https://github.com/meudayhegde/ESPUtils_ESP8266)
+[![version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/meudayhegde/ESPUtils_ESP8266)
+[![status](https://img.shields.io/badge/status-alpha-gold.svg)](https://github.com/meudayhegde/ESPUtils_ESP8266)
 [![IDE](https://img.shields.io/badge/developed_in-Arduino_IDE-cyan.svg)](https://www.arduino.cc/en/software)
 
 ### Libraries used
@@ -11,7 +11,7 @@
 [![status](https://img.shields.io/badge/IRremoteESP8266-2.8.4-blue.svg)](https://github.com/crankyoldgit/IRremoteESP8266)
 
 ### Releases
-[![DOWNLOAD](https://img.shields.io/badge/Downloads-1.0.0_alpha-darkgreen.svg)](https://github.com/meudayhegde/ESPUtils_ESP8266/releases/tag/release-1.0.0-alpha)
+[![DOWNLOAD](https://img.shields.io/badge/Downloads-1.1.0_alpha-darkgreen.svg)](https://github.com/meudayhegde/ESPUtils_ESP8266/releases/tag/release-1.1.0-alpha)
 
 #### Android interface: [ESP Utils Android application](https://github.com/meudayhegde/ESPUtils_android)
 

@@ -77,6 +77,7 @@ WiFiUDP UDP;
 String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPIOPinValue);
 bool authenticate(const char* username, const char* password);
 void checkResetState(const int pinNumber);
+bool factoryReset();
 String generateIrResult(const decode_results * const results);
 String getGPIO(const int pinNumber);
 uint64_t getUInt64fromHex(char const *hex);
@@ -481,7 +482,22 @@ void checkResetState(const int pinNumber){
         pinState = digitalRead(pinNumber);
     }
     printSerial("Confirmed, begin Reset...");
-    printSerial(String("Clearing File: ") + GPIOConfigFile, "...  ");
+    factoryReset();
+}
+
+bool factoryReset(){
+   /*
+    * reset all configurations to default settings.
+    */
+    printSerial("Factory reset begin...");
+    if(LittleFS.format()){
+        printSerial("Factory reset successful.");
+    }else{
+        printSerial("Factory reset failed.");
+        return false;
+    }
+    
+    printSerial(String("Creating File: ") + GPIOConfigFile, "...  ");
     File file = LittleFS.open(GPIOConfigFile, "w");  
 
     if (!file){
@@ -493,8 +509,9 @@ void checkResetState(const int pinNumber){
     }
     setCredentials(deviceName, devicePassword);
     setWireless(defaultMode, deviceName, devicePassword);
-
     printSerial("Reset completed.");
+
+    return true;
 }
 
 String requestHandler(String request, WiFiClient client){
@@ -616,6 +633,12 @@ String requestHandler(String request, WiFiClient client){
     else if(strcmp(req, "restart") == 0){
         if(authenticate(username, password)){
             ESP.restart();
+        }else return String("{\"response\":\"deny\"}");
+    }
+
+    else if(strcmp(req, "reset") == 0){
+        if(authenticate(username, password)){
+            return String("{\"response\": \"") + (factoryReset()? "success": "failure") + "\"}";
         }else return String("{\"response\":\"deny\"}");
     }
     
