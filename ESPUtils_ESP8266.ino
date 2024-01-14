@@ -175,8 +175,7 @@ String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPI
     // read config file.
     // structure: [{"pinNumber": 2, "pinMode": "OUTPUT", "pinValue": 0},...]
     String gpioConfig = file.readStringUntil(']') + "]";
-    const size_t capacity = gpioConfig.length() + 512;
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
 
     printSerial("Parsing File...  ", "");    
     // parse config file to doc as JSONObject.
@@ -216,7 +215,7 @@ String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPI
 
     //If settings for GPIOPinNumber does not exist in storage, create new JSONObject for GPIOPinNumber.
     if(!pinConfExist){
-        JsonObject docNewPin = doc.createNestedObject();
+        JsonObject docNewPin = doc.add<JsonObject>();
         docNewPin["pinNumber"] = GPIOPinNumber;
         docNewPin["pinMode"] = GPIOPinMode;
         docNewPin["pinValue"] = GPIOPinValue;
@@ -256,8 +255,7 @@ String getGPIO(const int pinNumber){
     if(pinNumber == -1){
         return gpioConfig;
     }
-    const size_t capacity = gpioConfig.length() + 512;
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
     
     printSerial("Parsing File...  ", " ");
     // parse config file to doc as JSONObject
@@ -290,8 +288,7 @@ void initWireless(){
     File file = LittleFS.open(WiFiConfigFile, "r");
     printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
 
-    const size_t capacity = JSON_OBJECT_SIZE(5) + 240;
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
 
     printSerial("Parsing File...  ", " ");
     // parse WiFiConfigFile to doc as JSONObject
@@ -375,8 +372,7 @@ void initCredentials(){
     File file = LittleFS.open(LoginCredential, "r");
     printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
 
-    const size_t capacity = JSON_OBJECT_SIZE(2) + 200;
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
 
     printSerial("Parsing File...", "  ");
     // parse config file.
@@ -416,8 +412,7 @@ void handleDatagram(){
         if (len > 0){
             packet[len] = '\0';
         }
-        const size_t capacity = JSON_OBJECT_SIZE(1) + 128;
-        DynamicJsonDocument doc(capacity);
+        JsonDocument doc;
         printSerial("Parsing request from udp client...");
         DeserializationError error = deserializeJson(doc, packet);
         if (error){
@@ -518,12 +513,7 @@ String requestHandler(String request, WiFiClient client){
    /*
     * parse request (JSON) and return appropriate response (JSON)
     */
-    const size_t capacity = JSON_OBJECT_SIZE(6) + (request.length() * 1.5);
-
-    if(capacity > maxRequestLength )
-        return String("{\"response\":\"request length exceeded the limit!!\"}");
-    
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
     printSerial("Parsing request from socket client...", "  ");
     DeserializationError error = deserializeJson(doc, request.c_str());
     if (error){
@@ -670,8 +660,7 @@ String setWireless(const char* wireless_mode, const char* wireless_name, const c
         return String("{\"response\":\"Config File Creation Failed\"}");
     }
 
-    const size_t capacity = JSON_OBJECT_SIZE(5) + 240;
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
     
     if(strcmp(wireless_mode,"WIFI") == 0){
         doc["mode"] = "WIFI";
@@ -712,8 +701,7 @@ String setCredentials(const char* user_name,const char* passwd){
     if (!file)
         printSerial("Failed!, falling back to default configs");
         
-    const size_t capacity = JSON_OBJECT_SIZE(2) + 100;
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
     doc["username"] = user_name;
     doc["password"] = passwd;
     if (serializeJson(doc, file) == 0) {
@@ -857,8 +845,7 @@ void sendRawArray(uint16_t size, const char* irData){
    /*
     * when irData is int array.
     */
-    const size_t capacity = JSON_ARRAY_SIZE(size);
-    DynamicJsonDocument json(capacity);
+    JsonDocument json;
     deserializeJson(json, irData);
     uint16_t rawData[size];
     for(int i = 0; i < size; i++){
@@ -881,8 +868,7 @@ bool sendIrState(uint16_t size, decode_type_t protocol, const char* data){
     */
     String stateListString = String(data);
     stateListString.replace("'", "\"");
-    const size_t capacity = JSON_ARRAY_SIZE(size) + (6 * size);
-    DynamicJsonDocument doc(capacity);
+    JsonDocument doc;
     deserializeJson(doc, stateListString.c_str());
     printSerial(stateListString);
     uint8_t stateList[size];
