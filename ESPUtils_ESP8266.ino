@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
-#include <ESP8266WiFi.h>
+
 #include <WiFiUdp.h>
 #include <IRac.h>
 #include <IRrecv.h>
@@ -10,8 +10,15 @@
 #include <IRutils.h>
 #include <LittleFS.h>
 
+#ifdef ARDUINO_ARCH_ESP8266
+    #include <ESP8266WiFi.h>
+    #define LED 02
+#elif ARDUINO_ARCH_ESP32
+    #include <WiFi.h>
+    #define LED 8
+#endif
+
 #define LEGACY_TIMING_INFO false
-#define LED 02
 #define SERIAL_MONITOR_ENABLED true
 
 const char* WiFiConfigFile = "/WiFiConfig.json";
@@ -100,21 +107,23 @@ void setup();
 String setCredentials(const char* user_name,const char* passwd);
 String setWireless(const char* wireless_mode, const char* wireless_name, const char* wireless_passwd);
 
+
 void setup() {
    /*
     * Startup instructions.
     */
+    
     #if defined(ESP8266)
         Serial.begin(kBaudRate, SERIAL_8N1, SERIAL_TX_ONLY);
     #else
-        Serial.begin(kBaudRate, SERIAL_8N1);
+        Serial.begin(kBaudRate);
     #endif
     
     printSerial("## Set Board Indicator.");
     pinMode(LED, OUTPUT);
 
     printSerial("## Begin flash storage.");
-    LittleFS.begin();
+    LittleFS.begin(true);
 
     printSerial("## Apply GPIO settings.");
     applyGPIO(-1, "", 0);
@@ -215,7 +224,7 @@ String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPI
 
     //If settings for GPIOPinNumber does not exist in storage, create new JSONObject for GPIOPinNumber.
     if(!pinConfExist){
-        JsonObject docNewPin = doc.add<JsonObject>();
+        JsonObject docNewPin = array.createNestedObject();
         docNewPin["pinNumber"] = GPIOPinNumber;
         docNewPin["pinMode"] = GPIOPinMode;
         docNewPin["pinValue"] = GPIOPinValue;
@@ -229,11 +238,14 @@ String applyGPIO(const int GPIOPinNumber, const char* GPIOPinMode, const int GPI
     
     printSerial(String("Writing File: ") + GPIOConfigFile, "...  ");
     file = LittleFS.open(GPIOConfigFile, "w");  
-    printSerial((!file)? " Failed!, falling back to default configs." : " Done.");
-
-    // Save the updated content as file.
-    serializeJson(doc, file);
-    if(file) file.close();
+    if(!file){
+        printSerial(" Failed!, falling back to default configs.");
+    }else{
+        printSerial(" Done.");
+        // Save the updated content as file.
+        serializeJson(doc, file);
+        if(file) file.close();
+    }
     String ret = String("{\"response\": \"success\", \"pinValue\":");
     ret += retPinVal;
     ret += "}";
@@ -698,8 +710,10 @@ String setCredentials(const char* user_name,const char* passwd){
     LittleFS.remove(LoginCredential);
     printSerial(String("Writing File: ") + LoginCredential, " ");
     File file = LittleFS.open(LoginCredential, "w");
-    if (!file)
+    if (!file){
         printSerial("Failed!, falling back to default configs");
+        return String("{\"response\":\"Config File Creation Failed\"}");
+    }
         
     JsonDocument doc;
     doc["username"] = user_name;
@@ -898,5 +912,5 @@ size_t printSerial(const String serial, const char* end){
 }
 
 size_t printSerial(const char* serial, const char* end){
-    return SERIAL_MONITOR_ENABLED ? Serial.print(serial) + Serial.print(end) : 0; 
+    return SERIAL_MONITOR_ENABLED ? Serial.print(serial) + Serial.print(end) : 0;        
 }

@@ -7,7 +7,7 @@
 [![IDE](https://img.shields.io/badge/developed_in-Arduino_IDE-cyan.svg)](https://www.arduino.cc/en/software)
 
 ### Libraries used
-[![status](https://img.shields.io/badge/ArduinoJson-6.20.0-blue.svg)](https://arduinojson.org/v6/doc/)
+[![status](https://img.shields.io/badge/ArduinoJson-7.x-blue.svg)](https://arduinojson.org/)
 [![status](https://img.shields.io/badge/IRremoteESP8266-2.8.4-blue.svg)](https://github.com/crankyoldgit/IRremoteESP8266)
 
 ### Releases
