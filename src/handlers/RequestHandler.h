@@ -5,8 +5,10 @@
 #include <ArduinoJson.h>
 #ifdef ARDUINO_ARCH_ESP8266
     #include <ESP8266WiFi.h>
+    #include <ESP8266WebServer.h>
 #elif ARDUINO_ARCH_ESP32
     #include <WiFi.h>
+    #include <WebServer.h>
 #endif
 #include "src/config/Config.h"
 #include "src/auth/AuthManager.h"
@@ -16,108 +18,73 @@
 #include "src/storage/StorageManager.h"
 #include "src/utils/Utils.h"
 
-class RequestHandler {
+#ifdef ARDUINO_ARCH_ESP8266
+    typedef ESP8266WebServer WebServerType;
+#else
+    typedef WebServer WebServerType;
+#endif
+
+class ESPCommandHandler {
 public:
     /**
-     * @brief Handle incoming request from client
-     * @param request Request string (JSON format)
-     * @param client WiFiClient for bidirectional communication
-     * @return JSON response string
+     * @brief Initialize HTTP REST API endpoints
+     * @param server WebServer instance
      */
-    static String handleRequest(const String& request, WiFiClient& client);
+    static void setupRoutes(WebServerType& server);
     
 private:
+    // Middleware
     /**
-     * @brief Handle ping request
-     * @return JSON response with MAC address and chip ID
+     * @brief LED indicator middleware wrapper
+     * @param server WebServer instance
+     * @param handler Request handler function
      */
-    static String handlePing();
+    template<typename HandlerFunc>
+    static void withLEDIndicator(WebServerType& server, HandlerFunc handler) {
+        Utils::setLED(LOW);  // Turn LED on (active LOW)
+        handler(server);
+        Utils::setLED(HIGH); // Turn LED off
+    }
     
     /**
-     * @brief Handle device info request
-     * @return JSON response with comprehensive device details
+     * @brief Validate session token from Authorization header
+     * @param server WebServer instance
+     * @return true if valid, false otherwise
      */
-    static String handleDeviceInfo();
+    static bool validateSessionToken(WebServerType& server);
     
     /**
-     * @brief Handle authentication request
-     * @param doc JsonDocument containing request data
-     * @return JSON response
+     * @brief Send JSON error response
+     * @param server WebServer instance
+     * @param code HTTP status code
+     * @param message Error message
      */
-    static String handleAuthenticate(const JsonDocument& doc);
+    static void sendError(WebServerType& server, int code, const char* message);
     
     /**
-     * @brief Handle IR capture request
-     * @param doc JsonDocument containing request data
-     * @param client WiFiClient for streaming results
-     * @return JSON response
+     * @brief Send JSON success response
+     * @param server WebServer instance
+     * @param data JSON data to send
      */
-    static String handleIRCapture(const JsonDocument& doc, WiFiClient& client);
+    static void sendSuccess(WebServerType& server, const String& data);
     
-    /**
-     * @brief Handle IR send request
-     * @param doc JsonDocument containing request data
-     * @return JSON response
-     */
-    static String handleIRSend(const JsonDocument& doc);
+    // Public endpoints (no auth required)
+    static void handlePing(WebServerType& server);
     
-    /**
-     * @brief Handle wireless configuration update request
-     * @param doc JsonDocument containing request data
-     * @return JSON response
-     */
-    static String handleSetWireless(const JsonDocument& doc);
+    // Authentication endpoint
+    static void handleAuth(WebServerType& server);
     
-    /**
-     * @brief Handle user credentials update request
-     * @param doc JsonDocument containing request data
-     * @return JSON response
-     */
-    static String handleSetUser(const JsonDocument& doc);
-    
-    /**
-     * @brief Handle get wireless configuration request
-     * @return JSON response with wireless configuration
-     */
-    static String handleGetWireless();
-    
-    /**
-     * @brief Handle GPIO set request
-     * @param doc JsonDocument containing request data
-     * @return JSON response
-     */
-    static String handleGPIOSet(const JsonDocument& doc);
-    
-    /**
-     * @brief Handle GPIO get request
-     * @param doc JsonDocument containing request data
-     * @return JSON response
-     */
-    static String handleGPIOGet(const JsonDocument& doc);
-    
-    /**
-     * @brief Handle restart request
-     */
-    static void handleRestart();
-    
-    /**
-     * @brief Handle factory reset request
-     * @return JSON response
-     */
-    static String handleReset();
-    
-    /**
-     * @brief Verify authentication from request
-     * @param doc JsonDocument containing credentials
-     * @return true if authenticated, false otherwise
-     */
-    static bool verifyAuth(const JsonDocument& doc);
-    
-    /**
-     * @brief Build device info JSON response
-     * @return JSON string with device details
-     */
-    static String buildDeviceInfoJson();
+    // Protected endpoints (require session token)
+    static void handleDeviceInfo(WebServerType& server);
+    static void handleIRCapture(WebServerType& server);
+    static void handleIRSend(WebServerType& server);
+    static void handleSetWireless(WebServerType& server);
+    static void handleGetWireless(WebServerType& server);
+    static void handleSetUser(WebServerType& server);
+    static void handleGPIOSet(WebServerType& server);
+    static void handleGPIOGet(WebServerType& server);
+    static void handleRestart(WebServerType& server);
+    static void handleReset(WebServerType& server);
 };
 
 #endif // REQUEST_HANDLER_H

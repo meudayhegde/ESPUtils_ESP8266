@@ -7,7 +7,6 @@
 #elif ARDUINO_ARCH_ESP32
     #include <WiFi.h>
 #endif
-#include <WiFiUdp.h>
 #include <ArduinoJson.h>
 #include "src/config/Config.h"
 #include "src/storage/StorageManager.h"
@@ -15,8 +14,6 @@
 class WirelessNetworkManager {
 private:
     static WirelessConfig wirelessConfig;
-    static WiFiServer socketServer;
-    static WiFiUDP udp;
     static bool wirelessUpdatePending;
     static String cachedMacAddress;
     
@@ -32,16 +29,11 @@ public:
     static void initWireless();
     
     /**
-     * @brief Handle UDP datagrams
+     * @brief Initialize mDNS with device ID
+     * @param deviceID Device ID for mDNS hostname
+     * @return true if successful, false otherwise
      */
-    static void handleDatagram();
-    
-    /**
-     * @brief Handle TCP socket connections
-     * @param requestHandler Callback function to handle requests
-     * @return WiFiClient if connected, null client otherwise
-     */
-    static WiFiClient handleSocket();
+    static bool initMDNS(const String& deviceID);
     
     /**
      * @brief Update wireless configuration

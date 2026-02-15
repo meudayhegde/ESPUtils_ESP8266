@@ -53,7 +53,7 @@ namespace Utils {
         return result;
     }
     
-    uint64_t getChipID() {
+    uint64_t getDeviceID() {
         #ifdef ARDUINO_ARCH_ESP8266
             // For ESP8266: Use built-in chip ID
             return ESP.getChipId();
@@ -65,16 +65,16 @@ namespace Utils {
         #endif
     }
     
-    String getChipIDString() {
-        uint64_t chipid = getChipID();
+    String getDeviceIDString() {
+        uint64_t deviceid = getDeviceID();
         char buffer[16];
         
         #ifdef ARDUINO_ARCH_ESP8266
-            // ESP8266 chip ID is 32-bit
-            snprintf(buffer, sizeof(buffer), "%08llX", (unsigned long long)chipid);
+            // ESP8266 device ID is 32-bit
+            snprintf(buffer, sizeof(buffer), "%08llX", (unsigned long long)deviceid);
         #elif ARDUINO_ARCH_ESP32
             // ESP32 eFuseMac is 48-bit (6 bytes)
-            snprintf(buffer, sizeof(buffer), "%012llX", (unsigned long long)(chipid & 0xFFFFFFFFFFFFULL));
+            snprintf(buffer, sizeof(buffer), "%012llX", (unsigned long long)(deviceid & 0xFFFFFFFFFFFFULL));
         #endif
         
         return String(buffer);

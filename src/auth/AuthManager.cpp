@@ -10,6 +10,21 @@ void AuthManager::begin() {
         Utils::printSerial(F("Using default credentials."));
         // Default values already set in UserConfig constructor
     }
+    
+    // Initialize session manager
+    SessionManager::begin();
+}
+
+String AuthManager::authenticateWithJWT(const String& jwtToken) {
+    return SessionManager::authenticateWithJWT(jwtToken);
+}
+
+bool AuthManager::validateSession(const String& sessionToken) {
+    return SessionManager::validateSession(sessionToken);
+}
+
+void AuthManager::logout() {
+    SessionManager::invalidateSession();
 }
 
 bool AuthManager::authenticate(const char* username, const char* password) {

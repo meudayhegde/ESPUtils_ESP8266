@@ -3,8 +3,14 @@
 
 #ifdef ARDUINO_ARCH_ESP8266
     #include <ESP8266WiFi.h>
+    #include <ESP8266WebServer.h>
+    #include <ESP8266mDNS.h>
+    typedef ESP8266WebServer WebServerType;
 #elif ARDUINO_ARCH_ESP32
     #include <WiFi.h>
+    #include <WebServer.h>
+    #include <ESPmDNS.h>
+    typedef WebServer WebServerType;
 #endif
 
 // Application Modules
@@ -16,6 +22,9 @@
 #include "src/hardware/GPIOManager.h"
 #include "src/hardware/IRManager.h"
 #include "src/handlers/RequestHandler.h"
+
+// HTTP Server
+WebServerType httpServer(Config::HTTP_PORT);
 
 /**
  * @brief Initialize all system components
@@ -54,6 +63,18 @@ void setup() {
     // Load user credentials
     AuthManager::begin();
     
+    // Get device ID for mDNS
+    String deviceID = Utils::getDeviceIDString();
+    deviceID.toLowerCase();
+    
+    // Setup HTTP REST API routes
+    ESPCommandHandler::setupRoutes(httpServer);
+    
+    // Start HTTP server
+    httpServer.begin();
+    Utils::printSerial(F("## HTTP server started on port "), "");
+    Utils::printSerial(String(Config::HTTP_PORT).c_str());
+    
     // Setup OTA updates
     setupOTA();
     
@@ -61,13 +82,21 @@ void setup() {
     Utils::printSerial(F("System Initialization Complete"));
     Utils::printSerial(F("Device: "), "");
     Utils::printSerial(FPSTR(Config::DEVICE_NAME));
-    Utils::printSerial(F("Chip ID: "), "");
-    Utils::printSerial(Utils::getChipIDString().c_str());
+    Utils::printSerial(F("Device ID: "), "");
+    Utils::printSerial(Utils::getDeviceIDString().c_str());
     Utils::printSerial(F("IP: "), "");
     Utils::printSerial(WirelessNetworkManager::getIPAddress().c_str());
     Utils::printSerial(F("MAC: "), "");
     Utils::printSerial(WirelessNetworkManager::getMacAddress().c_str());
+    Utils::printSerial(F("mDNS: "), "");
+    Utils::printSerial(deviceID.c_str(), ".local");
+    Serial.println();
     Utils::printSerial(F("========================================\n"));
+
+    // Initialize mDNS with device ID
+    WirelessNetworkManager::initMDNS(deviceID);
+
+    Utils::ledPulse(10, 50, 50);
 }
 
 /**
@@ -127,36 +156,31 @@ void loop() {
     // Handle OTA updates
     ArduinoOTA.handle();
     
-    // Handle UDP datagrams
-    WirelessNetworkManager::handleDatagram();
+    // Handle HTTP requests
+    httpServer.handleClient();
     
-    // Handle TCP socket connections
-    WiFiClient client = WirelessNetworkManager::handleSocket();
-    
-    if (client && client.connected()) {
-        while (client.connected()) {
-            while (client.available()) {
-                String request = client.readStringUntil('\n');
-                String response = RequestHandler::handleRequest(request, client);
-                
-                response.replace("\n", "");
-                client.println(response);
-                client.flush();
-                client.stop();
-            }
-        }
-        Utils::printSerial(F("Client disconnected."));
-    }
+    // Handle mDNS (both platforms benefit from periodic updates)
+    #ifdef ARDUINO_ARCH_ESP8266
+        MDNS.update();
+    #endif
     
     // Apply wireless configuration updates if pending
     if (WirelessNetworkManager::isWirelessUpdatePending()) {
         WirelessNetworkManager::initWireless();
         WirelessNetworkManager::clearWirelessUpdateFlag();
+        
+        // Wait for network to stabilize before reinitializing mDNS
+        delay(500);
+        
+        // Reinitialize mDNS after network change
+        String deviceID = Utils::getDeviceIDString();
+        deviceID.toLowerCase();
+        WirelessNetworkManager::initMDNS(deviceID);
     }
     
     // Optional: Check for factory reset trigger
     // if (GPIOManager::checkResetState(4)) {
-    //     RequestHandler::handleReset();
+    //     StorageManager::format();
     //     ESP.restart();
     // }
     

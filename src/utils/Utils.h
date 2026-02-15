@@ -47,17 +47,17 @@ namespace Utils {
     }
     
     /**
-     * @brief Get unique chip ID (eFuseMac) from device
+     * @brief Get unique device ID (eFuseMac) from device
      * Works for both ESP8266 and ESP32
-     * @return 48-bit chip ID as uint64_t
+     * @return 48-bit device ID as uint64_t
      */
-    uint64_t getChipID();
+    uint64_t getDeviceID();
     
     /**
-     * @brief Get chip ID as formatted hex string
-     * @return Chip ID formatted as uppercase hex (e.g., "AABBCCDDEEFF")
+     * @brief Get device ID as formatted hex string
+     * @return Device ID formatted as uppercase hex (e.g., "AABBCCDDEEFF")
      */
-    String getChipIDString();
+    String getDeviceIDString();
 }
 
 #endif // UTILS_H

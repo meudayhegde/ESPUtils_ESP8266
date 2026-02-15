@@ -1,0 +1,32 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "~/Library/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/cores/esp8266",
+                "~/Library/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/tools/sdk/include",
+                "~/Library/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/tools/sdk/lwip2/include",
+                "~/Library/Arduino15/packages/esp8266/tools/xtensa-lx106-elf-gcc/3.1.0-gcc10.3-e5f9fec/xtensa-lx106-elf/include",
+                "~/Library/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/libraries/**",
+                "~/Library/Arduino15/packages/esp8266/hardware/esp8266/3.1.2/variants/nodemcu",
+                "~/Library/Arduino15/packages/esp32/hardware/esp32/3.3.6/cores/esp32",
+                "~/Library/Arduino15/packages/esp32/hardware/esp32/3.3.6/libraries/**",
+                "~/Library/Arduino15/packages/esp32/tools/esp-x32/2511/xtensa-esp-elf/include",
+                "~/Documents/Arduino/libraries/**"
+            ],
+            "defines": [
+                "ARDUINO_ARCH_ESP8266",
+                "ESP8266",
+                "ARDUINO=10819",
+                "F_CPU=80000000L"
+            ],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "macos-clang-x64",
+            "forcedInclude": []
+        }
+    ],
+    "version": 4
+}

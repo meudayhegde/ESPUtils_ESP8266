@@ -27,15 +27,16 @@ namespace Config {
     constexpr uint8_t IR_SEND_PIN = 4;
     
     // Network Ports
-    constexpr uint16_t SOCKET_PORT = 48321;
+    constexpr uint16_t HTTP_PORT = 80;
     constexpr uint16_t OTA_PORT = 48325;
-    constexpr uint16_t UDP_PORT_ESP = 48327;
-    constexpr uint16_t UDP_PORT_APP = 48326;
     
     // Timing Configuration
     constexpr uint8_t RECV_TIMEOUT_SEC = 8;
     constexpr uint8_t WIRELESS_TIMEOUT_SEC = 20;
     constexpr uint8_t IR_TIMEOUT_MS = 50;
+    
+    // Session Configuration
+    constexpr unsigned long SESSION_EXPIRY_SECONDS = 604800; // 1 week in seconds
     
     // Serial Configuration
     constexpr uint32_t BAUD_RATE = 115200;
@@ -49,12 +50,12 @@ namespace Config {
     
     // Protocol Configuration
     constexpr uint16_t MAX_REQUEST_LENGTH = 5120;
-    constexpr uint16_t UDP_PACKET_SIZE = 255;
     
     // File Paths
     const char WIFI_CONFIG_FILE[] PROGMEM = "/WiFiConfig.json";
     const char LOGIN_CREDENTIAL_FILE[] PROGMEM = "/LoginCredential.json";
     const char GPIO_CONFIG_FILE[] PROGMEM = "/GPIOConfig.json";
+    const char SESSION_FILE[] PROGMEM = "/Session.json";
 }
 
 // ================================
@@ -99,7 +100,10 @@ namespace ResponseMsg {
     const char SUCCESS[] PROGMEM = "success";
     const char FAILURE[] PROGMEM = "failure";
     const char DENY[] PROGMEM = "deny";
+    const char UNAUTHORIZED[] PROGMEM = "unauthorized";
     const char AUTHENTICATED[] PROGMEM = "authenticated";
+    const char INVALID_TOKEN[] PROGMEM = "invalid_token";
+    const char SESSION_EXPIRED[] PROGMEM = "session_expired";
     const char TIMEOUT[] PROGMEM = "timeout";
     const char PROGRESS[] PROGMEM = "progress";
     const char UNDEFINED[] PROGMEM = "undefined";

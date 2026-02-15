@@ -1,19 +1,17 @@
 #include "WirelessNetworkManager.h"
 #include "src/utils/Utils.h"
+#ifdef ARDUINO_ARCH_ESP8266
+    #include <ESP8266mDNS.h>
+#elif ARDUINO_ARCH_ESP32
+    #include <ESPmDNS.h>
+#endif
 
 WirelessConfig WirelessNetworkManager::wirelessConfig;
-WiFiServer WirelessNetworkManager::socketServer(Config::SOCKET_PORT);
-WiFiUDP WirelessNetworkManager::udp;
 bool WirelessNetworkManager::wirelessUpdatePending = false;
 String WirelessNetworkManager::cachedMacAddress;
 
 void WirelessNetworkManager::begin() {
-    Utils::printSerial(F("## Begin TCP socket server."));
-    socketServer.begin();
-    
-    Utils::printSerial(F("## Begin UDP on port: "), "");
-    Utils::printSerial(String(Config::UDP_PORT_ESP).c_str());
-    udp.begin(Config::UDP_PORT_ESP);
+    Utils::printSerial(F("## Initialize Network Manager."));
     
     // Cache MAC address (it never changes)
     if (cachedMacAddress.length() == 0) {
@@ -54,8 +52,10 @@ void WirelessNetworkManager::initWireless() {
                 if (Config::SERIAL_MONITOR_ENABLED) {
                     Serial.println(WiFi.localIP());
                 }
-                delay(2000);
+                // Wait for network stack to stabilize (important for mDNS)
+                delay(500);
                 Utils::setLED(HIGH);
+                delay(1500);
                 return;
             }
             
@@ -84,59 +84,36 @@ void WirelessNetworkManager::initWireless() {
     Utils::ledPulse(1000, 2000, 3);
 }
 
-void WirelessNetworkManager::handleDatagram() {
-    char packet[Config::UDP_PACKET_SIZE];
-    int packetSize = udp.parsePacket();
+bool WirelessNetworkManager::initMDNS(const String& deviceID) {
+    Utils::printSerial(F("## Setting up mDNS responder..."));
     
-    if (!packetSize) {
-        return;
+    // Stop any existing mDNS instance
+    #ifdef ARDUINO_ARCH_ESP32
+        MDNS.end();
+        delay(100);
+    #endif
+    
+    // mDNS hostname will be: <deviceID>.local
+    if (!MDNS.begin(deviceID.c_str())) {
+        Utils::printSerial(F("Error setting up mDNS responder!"));
+        return false;
     }
     
-    int len = udp.read(packet, Config::UDP_PACKET_SIZE - 1);
-    if (len > 0) {
-        packet[len] = '\0';
-    }
+    Utils::printSerial(F("mDNS responder started: "), "");
+    Utils::printSerial(deviceID.c_str(), ".local");
+    Serial.println();
     
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, packet);
+    // Add HTTP service with instance name
+    MDNS.addService("http", "tcp", Config::HTTP_PORT);
     
-    if (error) {
-        Utils::printSerial(F("Failed to parse UDP packet."));
-        return;
-    }
+    Utils::printSerial(F("HTTP service advertised via mDNS."));
     
-    const char* request = doc["request"] | "undefined";
-    IPAddress remoteIP = udp.remoteIP();
+    // Force initial announcement
+    #ifdef ARDUINO_ARCH_ESP8266
+        MDNS.announce();
+    #endif
     
-    Utils::printSerial(F("UDP request from "), "");
-    Utils::printSerial(remoteIP.toString().c_str(), ": ");
-    Utils::printSerial(request);
-    
-    // Handle ping request
-    if (strcmp(request, "ping") == 0) {
-        char response[64];
-        snprintf(response, sizeof(response), "{\"MAC\": \"%s\"}", cachedMacAddress.c_str());
-        udp.beginPacket(remoteIP, Config::UDP_PORT_APP);
-        udp.print(response);
-        udp.endPacket();
-        Utils::printSerial(F("Response: "), "");
-        Utils::printSerial(response);
-    } else {
-        Utils::printSerial(F("Request not identified, abort."));
-    }
-}
-
-WiFiClient WirelessNetworkManager::handleSocket() {
-    WiFiClient client = socketServer.available();
-    
-    if (client && client.connected()) {
-        Utils::printSerial(F("Client Connected, client IP: "), "");
-        if (Config::SERIAL_MONITOR_ENABLED) {
-            Serial.println(client.remoteIP());
-        }
-    }
-    
-    return client;
+    return true;
 }
 
 bool WirelessNetworkManager::updateWirelessConfig(const char* mode, const char* ssid, const char* password) {

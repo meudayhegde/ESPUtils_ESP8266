@@ -1,153 +1,252 @@
 #include "RequestHandler.h"
 
-String RequestHandler::handleRequest(const String& request, WiFiClient& client) {
-    JsonDocument doc;
+void ESPCommandHandler::setupRoutes(WebServerType& server) {
+    Utils::printSerial(F("## Setting up HTTP REST API routes."));
     
-    Utils::printSerial(F("Parsing request from socket client..."), "  ");
-    DeserializationError error = deserializeJson(doc, request.c_str());
+    // Public endpoint - with LED indicator
+    server.on("/ping", HTTP_GET, [&server]() { 
+        withLEDIndicator(server, handlePing); 
+    });
+    
+    // Authentication endpoint - with LED indicator
+    server.on("/api/auth", HTTP_POST, [&server]() { 
+        withLEDIndicator(server, handleAuth); 
+    });
+    
+    // Protected endpoints - with LED indicator
+    server.on("/api/device", HTTP_GET, [&server]() { 
+        withLEDIndicator(server, handleDeviceInfo); 
+    });
+    server.on("/api/ir/capture", HTTP_POST, [&server]() { 
+        withLEDIndicator(server, handleIRCapture); 
+    });
+    server.on("/api/ir/send", HTTP_POST, [&server]() { 
+        withLEDIndicator(server, handleIRSend); 
+    });
+    server.on("/api/wireless", HTTP_PUT, [&server]() { 
+        withLEDIndicator(server, handleSetWireless); 
+    });
+    server.on("/api/wireless", HTTP_GET, [&server]() { 
+        withLEDIndicator(server, handleGetWireless); 
+    });
+    server.on("/api/user", HTTP_PUT, [&server]() { 
+        withLEDIndicator(server, handleSetUser); 
+    });
+    server.on("/api/gpio/set", HTTP_POST, [&server]() { 
+        withLEDIndicator(server, handleGPIOSet); 
+    });
+    server.on("/api/gpio/get", HTTP_GET, [&server]() { 
+        withLEDIndicator(server, handleGPIOGet); 
+    });
+    server.on("/api/restart", HTTP_POST, [&server]() { 
+        withLEDIndicator(server, handleRestart); 
+    });
+    server.on("/api/reset", HTTP_POST, [&server]() { 
+        withLEDIndicator(server, handleReset); 
+    });
+    
+    Utils::printSerial(F("HTTP REST API routes configured with LED middleware."));
+}
+
+bool ESPCommandHandler::validateSessionToken(WebServerType& server) {
+    // Check for Authorization header
+    if (!server.hasHeader("Authorization")) {
+        Utils::printSerial(F("Missing Authorization header."));
+        return false;
+    }
+    
+    String authHeader = server.header("Authorization");
+    Utils::printSerial(F("Authorization header: "), authHeader.c_str());
+
+    // Check format: "Session <token>"
+    if (!authHeader.startsWith("Session ")) {
+        Utils::printSerial(F("Invalid Authorization header format."));
+        return false;
+    }
+    
+    // Extract token
+    String sessionToken = authHeader.substring(8); // Skip "Session "
+    
+    // Validate session
+    if (!AuthManager::validateSession(sessionToken)) {
+        Utils::printSerial(F("Invalid or expired session token."));
+        return false;
+    }
+    
+    return true;
+}
+
+void ESPCommandHandler::sendError(WebServerType& server, int code, const char* message) {
+    JsonDocument doc;
+    doc["error"] = message;
+    
+    String response;
+    serializeJson(doc, response);
+    
+    server.send(code, "application/json", response);
+}
+
+void ESPCommandHandler::sendSuccess(WebServerType& server, const String& data) {
+    server.send(200, "application/json", data);
+}
+
+// ================================
+// Public Endpoints
+// ================================
+
+void ESPCommandHandler::handlePing(WebServerType& server) {
+    Utils::printSerial(F("Handling /ping request"));
+    
+    JsonDocument doc;
+    doc["deviceID"] = Utils::getDeviceIDString();
+    doc["ipAddress"] = WirelessNetworkManager::getIPAddress();
+    doc["deviceName"] = String(FPSTR(Config::DEVICE_NAME));
+    
+    String response;
+    serializeJson(doc, response);
+    
+    sendSuccess(server, response);
+}
+
+// ================================
+// Authentication Endpoint
+// ================================
+
+void ESPCommandHandler::handleAuth(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/auth request"));
+    
+    if (!server.hasArg("plain")) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        Utils::printSerial(F("Failed."));
-        char response[64];
-        snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
-        return String(response);
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
     }
     
-    Utils::printSerial(F("Done."));
+    const char* jwtToken = doc["token"] | "";
     
-    const char* requestType = doc["request"] | "";
+    if (strlen(jwtToken) == 0) {
+        sendError(server, 400, "JWT token required");
+        return;
+    }
     
-    Utils::printSerial(F("Incoming request: "), "");
-    Utils::printSerial(requestType);
+    // Authenticate with JWT and get session token
+    String sessionToken = AuthManager::authenticateWithJWT(jwtToken);
     
-    // Route request to appropriate handler
-    if (strlen(requestType) == 0 || strcmp(requestType, "undefined") == 0) {
-        char response[64];
-        snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::PURPOSE_NOT_DEFINED));
-        return String(response);
+    if (sessionToken.length() == 0) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
     }
-    else if (strcmp(requestType, "ping") == 0) {
-        return handlePing();
-    }
-    else if (strcmp(requestType, "device_info") == 0) {
-        return handleDeviceInfo();
-    }
-    else if (strcmp(requestType, "authenticate") == 0) {
-        return handleAuthenticate(doc);
-    }
-    else if (strcmp(requestType, "ir_capture") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleIRCapture(doc, client);
-    }
-    else if (strcmp(requestType, "ir_send") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleIRSend(doc);
-    }
-    else if (strcmp(requestType, "set_wireless") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleSetWireless(doc);
-    }
-    else if (strcmp(requestType, "set_user") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleSetUser(doc);
-    }
-    else if (strcmp(requestType, "get_wireless") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleGetWireless();
-    }
-    else if (strcmp(requestType, "gpio_set") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleGPIOSet(doc);
-    }
-    else if (strcmp(requestType, "gpio_get") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleGPIOGet(doc);
-    }
-    else if (strcmp(requestType, "restart") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        handleRestart();
-        return F("{\"response\":\"restarting\"}");
-    }
-    else if (strcmp(requestType, "reset") == 0) {
-        if (!verifyAuth(doc)) {
-            char response[32];
-            snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-            return String(response);
-        }
-        return handleReset();
-    }
-    else {
-        char response[64];
-        snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::INVALID_PURPOSE));
-        return String(response);
-    }
+    
+    // Return session token
+    JsonDocument responseDoc;
+    responseDoc["sessionToken"] = sessionToken;
+    responseDoc["expiresIn"] = Config::SESSION_EXPIRY_SECONDS;
+    
+    String response;
+    serializeJson(responseDoc, response);
+    
+    sendSuccess(server, response);
 }
 
-String RequestHandler::handlePing() {
-    char response[128];
-    snprintf(response, sizeof(response), "{\"MAC\":\"%s\",\"chipID\":\"%s\"}", 
-             WirelessNetworkManager::getMacAddress().c_str(), 
-             Utils::getChipIDString().c_str());
-    return String(response);
-}
+// ================================
+// Protected Endpoints
+// ================================
 
-String RequestHandler::handleDeviceInfo() {
-    return buildDeviceInfoJson();
-}
-
-String RequestHandler::handleAuthenticate(const JsonDocument& doc) {
-    const char* username = doc["username"] | "";
-    const char* password = doc["password"] | "";
+void ESPCommandHandler::handleDeviceInfo(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/device request"));
     
-    if (AuthManager::authenticate(username, password)) {
-        char response[64];
-        snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::AUTHENTICATED));
-        return String(response);
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
     }
     
-    char response[32];
-    snprintf(response, sizeof(response), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::DENY));
-    return String(response);
+    JsonDocument doc;
+    doc["deviceName"] = String(FPSTR(Config::DEVICE_NAME));
+    doc["deviceID"] = Utils::getDeviceIDString();
+    doc["macAddress"] = WirelessNetworkManager::getMacAddress();
+    doc["ipAddress"] = WirelessNetworkManager::getIPAddress();
+    
+#ifdef ARDUINO_ARCH_ESP8266
+    doc["platform"] = F("ESP8266");
+    doc["deviceIDDecimal"] = (uint32_t)Utils::getDeviceID();
+#elif ARDUINO_ARCH_ESP32
+    doc["platform"] = F("ESP32");
+    doc["deviceIDDecimal"] = (uint32_t)(Utils::getDeviceID() & 0xFFFFFFFF);
+#endif
+    
+    doc["wirelessMode"] = WirelessNetworkManager::getWirelessConfig().mode;
+    
+    String response;
+    serializeJson(doc, response);
+    
+    sendSuccess(server, response);
 }
 
-String RequestHandler::handleIRCapture(const JsonDocument& doc, WiFiClient& client) {
-    const int captureMode = doc["capture_mode"] | 0;
-    return IRManager::captureIR(captureMode, client);
+void ESPCommandHandler::handleIRCapture(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/ir/capture request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
+    if (!server.hasArg("plain")) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    const int captureMode = doc["captureMode"] | 0;
+    
+    Utils::setLED(LOW);
+    
+    // Note: IR capture might need streaming response
+    // For now, using basic capture without client streaming
+    WiFiClient dummyClient; // Placeholder
+    String result = IRManager::captureIR(captureMode, dummyClient);
+    
+    Utils::setLED(HIGH);
+    
+    sendSuccess(server, result);
 }
 
-String RequestHandler::handleIRSend(const JsonDocument& doc) {
+void ESPCommandHandler::handleIRSend(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/ir/send request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
+    if (!server.hasArg("plain")) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
     const char* irData = doc["irCode"] | "";
     const char* lengthStr = doc["length"] | "0";
     const char* protocol = doc["protocol"] | "UNKNOWN";
@@ -158,13 +257,34 @@ String RequestHandler::handleIRSend(const JsonDocument& doc) {
     String result = IRManager::sendIR(size, protocol, irData);
     Utils::setLED(HIGH);
     
-    return result;
+    sendSuccess(server, result);
 }
 
-String RequestHandler::handleSetWireless(const JsonDocument& doc) {
-    const char* wirelessMode = doc["wireless_mode"] | "AP";
-    const char* newSSID = doc["new_ssid"] | "";
-    const char* newPass = doc["new_pass"] | "";
+void ESPCommandHandler::handleSetWireless(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/wireless PUT request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
+    if (!server.hasArg("plain")) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    const char* wirelessMode = doc["mode"] | "AP";
+    const char* newSSID = doc["ssid"] | "";
+    const char* newPass = doc["password"] | "";
     
     WirelessConfig currentConfig = WirelessNetworkManager::getWirelessConfig();
     
@@ -186,51 +306,153 @@ String RequestHandler::handleSetWireless(const JsonDocument& doc) {
     }
     
     if (WirelessNetworkManager::updateWirelessConfig(wirelessMode, newSSID, newPass)) {
-        return F("{\"response\":\"Wireless config successfully applied\"}");
+        JsonDocument responseDoc;
+        responseDoc["response"] = FPSTR(ResponseMsg::SUCCESS);
+        responseDoc["message"] = "Wireless config updated";
+        
+        String response;
+        serializeJson(responseDoc, response);
+        
+        sendSuccess(server, response);
+    } else {
+        sendError(server, 500, FPSTR_TO_CSTR(ResponseMsg::FAILURE));
     }
-    
-    return F("{\"response\":\"Config update failed\"}");
 }
 
-String RequestHandler::handleSetUser(const JsonDocument& doc) {
-    const char* newUsername = doc["new_username"] | "";
-    const char* newPassword = doc["new_password"] | "";
+void ESPCommandHandler::handleGetWireless(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/wireless GET request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
+    String config = WirelessNetworkManager::getWirelessConfigJson();
+    sendSuccess(server, config);
+}
+
+void ESPCommandHandler::handleSetUser(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/user PUT request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
+    if (!server.hasArg("plain")) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    const char* newUsername = doc["username"] | "";
+    const char* newPassword = doc["password"] | "";
     
     if (strlen(newUsername) == 0 || strlen(newPassword) == 0) {
-        return F("{\"response\":\"Invalid username or password\"}");
+        sendError(server, 400, "Invalid username or password");
+        return;
     }
     
     if (AuthManager::updateCredentials(newUsername, newPassword)) {
-        return F("{\"response\":\"User config successfully applied\"}");
+        JsonDocument responseDoc;
+        responseDoc["response"] = FPSTR(ResponseMsg::SUCCESS);
+        responseDoc["message"] = "User credentials updated";
+        
+        String response;
+        serializeJson(responseDoc, response);
+        
+        sendSuccess(server, response);
+    } else {
+        sendError(server, 500, FPSTR_TO_CSTR(ResponseMsg::FAILURE));
+    }
+}
+
+void ESPCommandHandler::handleGPIOSet(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/gpio/set request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
     }
     
-    return F("{\"response\":\"User config update failed\"}");
-}
-
-String RequestHandler::handleGetWireless() {
-    return WirelessNetworkManager::getWirelessConfigJson();
-}
-
-String RequestHandler::handleGPIOSet(const JsonDocument& doc) {
+    if (!server.hasArg("plain")) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
+    String body = server.arg("plain");
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        return;
+    }
+    
     const int pinNumber = doc["pinNumber"] | -1;
     const char* pinMode = doc["pinMode"] | "";
     const int pinValue = doc["pinValue"] | 0;
     
-    return GPIOManager::applyGPIO(pinNumber, pinMode, pinValue);
+    String result = GPIOManager::applyGPIO(pinNumber, pinMode, pinValue);
+    
+    sendSuccess(server, result);
 }
 
-String RequestHandler::handleGPIOGet(const JsonDocument& doc) {
-    const int pinNumber = doc["pinNumber"] | -1;
-    return GPIOManager::getGPIO(pinNumber);
+void ESPCommandHandler::handleGPIOGet(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/gpio/get request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
+    if (!server.hasArg("pin")) {
+        sendError(server, 400, "Pin number required");
+        return;
+    }
+    
+    int pinNumber = server.arg("pin").toInt();
+    String result = GPIOManager::getGPIO(pinNumber);
+    
+    sendSuccess(server, result);
 }
 
-void RequestHandler::handleRestart() {
-    Utils::printSerial(F("Restarting device..."));
+void ESPCommandHandler::handleRestart(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/restart request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
+    JsonDocument responseDoc;
+    responseDoc["response"] = "restarting";
+    
+    String response;
+    serializeJson(responseDoc, response);
+    
+    sendSuccess(server, response);
+    
     delay(100);
     ESP.restart();
 }
 
-String RequestHandler::handleReset() {
+void ESPCommandHandler::handleReset(WebServerType& server) {
+    Utils::printSerial(F("Handling /api/reset request"));
+    
+    if (!validateSessionToken(server)) {
+        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        return;
+    }
+    
     bool success = StorageManager::format();
     
     if (success) {
@@ -243,39 +465,11 @@ String RequestHandler::handleReset() {
         Utils::printSerial(F("Reset completed."));
     }
     
-    char response[32];
-    snprintf(response, sizeof(response), "{\"response\":\"%s\"}", 
-             success ? FPSTR_TO_CSTR(ResponseMsg::SUCCESS) : FPSTR_TO_CSTR(ResponseMsg::FAILURE));
-    return String(response);
-}
-
-bool RequestHandler::verifyAuth(const JsonDocument& doc) {
-    const char* username = doc["username"] | "";
-    const char* password = doc["password"] | "";
-    
-    return AuthManager::authenticate(username, password);
-}
-
-String RequestHandler::buildDeviceInfoJson() {
-    JsonDocument doc;
-    
-    doc["device_name"] = String(FPSTR(Config::DEVICE_NAME));
-    doc["chip_id"] = Utils::getChipIDString();
-    doc["mac_address"] = WirelessNetworkManager::getMacAddress();
-    doc["ip_address"] = WirelessNetworkManager::getIPAddress();
-    
-#ifdef ARDUINO_ARCH_ESP8266
-    doc["platform"] = F("ESP8266");
-    doc["chip_id_decimal"] = (uint32_t)Utils::getChipID();
-#elif ARDUINO_ARCH_ESP32
-    doc["platform"] = F("ESP32");
-    doc["chip_id_decimal"] = (uint32_t)(Utils::getChipID() & 0xFFFFFFFF);
-#endif
-    
-    doc["wireless_mode"] = WirelessNetworkManager::getWirelessConfig().mode;
+    JsonDocument responseDoc;
+    responseDoc["response"] = success ? FPSTR(ResponseMsg::SUCCESS) : FPSTR(ResponseMsg::FAILURE);
     
     String response;
-    response.reserve(256); // Pre-allocate estimated size
-    serializeJson(doc, response);
-    return response;
+    serializeJson(responseDoc, response);
+    
+    sendSuccess(server, response);
 }

@@ -15,6 +15,9 @@
 
 #### Android interface: [ESP Utils Android application](https://github.com/meudayhegde/ESPUtils_android)
 
+#### Python Client: [Python Client Documentation](README_PYTHON_CLIENT.md)
+`A comprehensive Python client library for programmatic control of ESP devices.`
+
 `This module is to be installed on ESP8266 / ESP32 Device.`
 #### Features
 - `Wireless switch: Can be used as wireless switch through android app connected by wifi network.`
