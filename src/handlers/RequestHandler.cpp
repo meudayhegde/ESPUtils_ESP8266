@@ -100,7 +100,7 @@ void ESPCommandHandler::handlePing(WebServerType& server) {
     JsonDocument doc;
     doc["deviceID"] = Utils::getDeviceIDString();
     doc["ipAddress"] = WirelessNetworkManager::getIPAddress();
-    doc["deviceName"] = String(FPSTR(Config::DEVICE_NAME));
+    doc["deviceName"] = Config::DEVICE_NAME;
     
     String response;
     serializeJson(doc, response);
@@ -116,7 +116,7 @@ void ESPCommandHandler::handleAuth(WebServerType& server) {
     Utils::printSerial(F("Handling /api/auth request"));
     
     if (!server.hasArg("plain")) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -125,7 +125,7 @@ void ESPCommandHandler::handleAuth(WebServerType& server) {
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -140,7 +140,7 @@ void ESPCommandHandler::handleAuth(WebServerType& server) {
     String sessionToken = AuthManager::authenticateWithJWT(jwtToken);
     
     if (sessionToken.length() == 0) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
@@ -163,12 +163,12 @@ void ESPCommandHandler::handleDeviceInfo(WebServerType& server) {
     Utils::printSerial(F("Handling /api/device request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
     JsonDocument doc;
-    doc["deviceName"] = String(FPSTR(Config::DEVICE_NAME));
+    doc["deviceName"] = Config::DEVICE_NAME;
     doc["deviceID"] = Utils::getDeviceIDString();
     doc["macAddress"] = WirelessNetworkManager::getMacAddress();
     doc["ipAddress"] = WirelessNetworkManager::getIPAddress();
@@ -193,12 +193,12 @@ void ESPCommandHandler::handleIRCapture(WebServerType& server) {
     Utils::printSerial(F("Handling /api/ir/capture request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
     if (!server.hasArg("plain")) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -207,7 +207,7 @@ void ESPCommandHandler::handleIRCapture(WebServerType& server) {
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -229,12 +229,12 @@ void ESPCommandHandler::handleIRSend(WebServerType& server) {
     Utils::printSerial(F("Handling /api/ir/send request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
     if (!server.hasArg("plain")) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -243,7 +243,7 @@ void ESPCommandHandler::handleIRSend(WebServerType& server) {
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -264,12 +264,12 @@ void ESPCommandHandler::handleSetWireless(WebServerType& server) {
     Utils::printSerial(F("Handling /api/wireless PUT request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
     if (!server.hasArg("plain")) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -278,7 +278,7 @@ void ESPCommandHandler::handleSetWireless(WebServerType& server) {
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -307,7 +307,7 @@ void ESPCommandHandler::handleSetWireless(WebServerType& server) {
     
     if (WirelessNetworkManager::updateWirelessConfig(wirelessMode, newSSID, newPass)) {
         JsonDocument responseDoc;
-        responseDoc["response"] = FPSTR(ResponseMsg::SUCCESS);
+        responseDoc["response"] = ResponseMsg::SUCCESS;
         responseDoc["message"] = "Wireless config updated";
         
         String response;
@@ -315,7 +315,7 @@ void ESPCommandHandler::handleSetWireless(WebServerType& server) {
         
         sendSuccess(server, response);
     } else {
-        sendError(server, 500, FPSTR_TO_CSTR(ResponseMsg::FAILURE));
+        sendError(server, 500, ResponseMsg::FAILURE);
     }
 }
 
@@ -323,7 +323,7 @@ void ESPCommandHandler::handleGetWireless(WebServerType& server) {
     Utils::printSerial(F("Handling /api/wireless GET request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
@@ -335,12 +335,12 @@ void ESPCommandHandler::handleSetUser(WebServerType& server) {
     Utils::printSerial(F("Handling /api/user PUT request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
     if (!server.hasArg("plain")) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -349,7 +349,7 @@ void ESPCommandHandler::handleSetUser(WebServerType& server) {
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -363,7 +363,7 @@ void ESPCommandHandler::handleSetUser(WebServerType& server) {
     
     if (AuthManager::updateCredentials(newUsername, newPassword)) {
         JsonDocument responseDoc;
-        responseDoc["response"] = FPSTR(ResponseMsg::SUCCESS);
+        responseDoc["response"] = ResponseMsg::SUCCESS;
         responseDoc["message"] = "User credentials updated";
         
         String response;
@@ -371,7 +371,7 @@ void ESPCommandHandler::handleSetUser(WebServerType& server) {
         
         sendSuccess(server, response);
     } else {
-        sendError(server, 500, FPSTR_TO_CSTR(ResponseMsg::FAILURE));
+        sendError(server, 500, ResponseMsg::FAILURE);
     }
 }
 
@@ -379,12 +379,12 @@ void ESPCommandHandler::handleGPIOSet(WebServerType& server) {
     Utils::printSerial(F("Handling /api/gpio/set request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
     if (!server.hasArg("plain")) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -393,7 +393,7 @@ void ESPCommandHandler::handleGPIOSet(WebServerType& server) {
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        sendError(server, 400, FPSTR_TO_CSTR(ResponseMsg::JSON_ERROR));
+        sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
     
@@ -410,7 +410,7 @@ void ESPCommandHandler::handleGPIOGet(WebServerType& server) {
     Utils::printSerial(F("Handling /api/gpio/get request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
@@ -429,7 +429,7 @@ void ESPCommandHandler::handleRestart(WebServerType& server) {
     Utils::printSerial(F("Handling /api/restart request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
@@ -449,7 +449,7 @@ void ESPCommandHandler::handleReset(WebServerType& server) {
     Utils::printSerial(F("Handling /api/reset request"));
     
     if (!validateSessionToken(server)) {
-        sendError(server, 401, FPSTR_TO_CSTR(ResponseMsg::UNAUTHORIZED));
+        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
     
@@ -466,7 +466,7 @@ void ESPCommandHandler::handleReset(WebServerType& server) {
     }
     
     JsonDocument responseDoc;
-    responseDoc["response"] = success ? FPSTR(ResponseMsg::SUCCESS) : FPSTR(ResponseMsg::FAILURE);
+    responseDoc["response"] = success ? ResponseMsg::SUCCESS : ResponseMsg::FAILURE;
     
     String response;
     serializeJson(responseDoc, response);

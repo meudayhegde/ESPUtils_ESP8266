@@ -3,18 +3,14 @@
 
 #include <Arduino.h>
 
-// Helper macros for PROGMEM strings
-#define FPSTR(pstr_pointer) (reinterpret_cast<const __FlashStringHelper *>(pstr_pointer))
-#define FPSTR_TO_CSTR(pstr_pointer) (reinterpret_cast<const char *>(pstr_pointer))
-
 // ================================
 // Device Configuration
 // ================================
 namespace Config {
     // Device Identity
-    const char DEVICE_NAME[] PROGMEM = "ESPUtils";
-    const char DEVICE_PASSWORD[] PROGMEM = "ESP.device@8266";
-    const char DEFAULT_MODE[] PROGMEM = "AP"; // AP / WIFI
+    const char DEVICE_NAME[] = "ESPUtils";
+    const char DEVICE_PASSWORD[] = "ESP.device@8266";
+    const char DEFAULT_MODE[] = "AP"; // AP / WIFI
 
     // Hardware Pin Configuration
     #ifdef ARDUINO_ARCH_ESP8266
@@ -52,10 +48,10 @@ namespace Config {
     constexpr uint16_t MAX_REQUEST_LENGTH = 5120;
     
     // File Paths
-    const char WIFI_CONFIG_FILE[] PROGMEM = "/WiFiConfig.json";
-    const char LOGIN_CREDENTIAL_FILE[] PROGMEM = "/LoginCredential.json";
-    const char GPIO_CONFIG_FILE[] PROGMEM = "/GPIOConfig.json";
-    const char SESSION_FILE[] PROGMEM = "/Session.json";
+    const char WIFI_CONFIG_FILE[] = "/WiFiConfig.json";
+    const char LOGIN_CREDENTIAL_FILE[] = "/LoginCredential.json";
+    const char GPIO_CONFIG_FILE[] = "/GPIOConfig.json";
+    const char SESSION_FILE[] = "/Session.json";
 }
 
 // ================================
@@ -65,7 +61,7 @@ struct UserConfig {
     String username;
     String password;
     
-    UserConfig() : username(String(FPSTR(Config::DEVICE_NAME))), password(String(FPSTR(Config::DEVICE_PASSWORD))) {}
+    UserConfig() : username(Config::DEVICE_NAME), password(Config::DEVICE_PASSWORD) {}
 };
 
 struct WirelessConfig {
@@ -76,11 +72,11 @@ struct WirelessConfig {
     String apPSK;
     
     WirelessConfig() : 
-        mode(String(FPSTR(Config::DEFAULT_MODE))),
-        stationSSID(String(FPSTR(Config::DEVICE_NAME))),
-        stationPSK(String(FPSTR(Config::DEVICE_PASSWORD))),
-        apSSID(String(FPSTR(Config::DEVICE_NAME))),
-        apPSK(String(FPSTR(Config::DEVICE_PASSWORD))) {}
+        mode(Config::DEFAULT_MODE),
+        stationSSID(Config::DEVICE_NAME),
+        stationPSK(Config::DEVICE_PASSWORD),
+        apSSID(Config::DEVICE_NAME),
+        apPSK(Config::DEVICE_PASSWORD) {}
 };
 
 struct GPIOConfig {
@@ -97,19 +93,19 @@ struct GPIOConfig {
 // Response Messages
 // ================================
 namespace ResponseMsg {
-    const char SUCCESS[] PROGMEM = "success";
-    const char FAILURE[] PROGMEM = "failure";
-    const char DENY[] PROGMEM = "deny";
-    const char UNAUTHORIZED[] PROGMEM = "unauthorized";
-    const char AUTHENTICATED[] PROGMEM = "authenticated";
-    const char INVALID_TOKEN[] PROGMEM = "invalid_token";
-    const char SESSION_EXPIRED[] PROGMEM = "session_expired";
-    const char TIMEOUT[] PROGMEM = "timeout";
-    const char PROGRESS[] PROGMEM = "progress";
-    const char UNDEFINED[] PROGMEM = "undefined";
-    const char INVALID_PURPOSE[] PROGMEM = "Invalid Purpose";
-    const char JSON_ERROR[] PROGMEM = "JSON Error, failed to parse the request";
-    const char PURPOSE_NOT_DEFINED[] PROGMEM = "Purpose not defined";
+    const char SUCCESS[] = "success";
+    const char FAILURE[] = "failure";
+    const char DENY[] = "deny";
+    const char UNAUTHORIZED[] = "unauthorized";
+    const char AUTHENTICATED[] = "authenticated";
+    const char INVALID_TOKEN[] = "invalid_token";
+    const char SESSION_EXPIRED[] = "session_expired";
+    const char TIMEOUT[] = "timeout";
+    const char PROGRESS[] = "progress";
+    const char UNDEFINED[] = "undefined";
+    const char INVALID_PURPOSE[] = "Invalid Purpose";
+    const char JSON_ERROR[] = "JSON Error, failed to parse the request";
+    const char PURPOSE_NOT_DEFINED[] = "Purpose not defined";
 }
 
 #endif // CONFIG_H

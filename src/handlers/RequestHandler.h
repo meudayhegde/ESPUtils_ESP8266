@@ -10,13 +10,13 @@
     #include <WiFi.h>
     #include <WebServer.h>
 #endif
-#include "src/config/Config.h"
-#include "src/auth/AuthManager.h"
-#include "src/network/WirelessNetworkManager.h"
-#include "src/hardware/GPIOManager.h"
-#include "src/hardware/IRManager.h"
-#include "src/storage/StorageManager.h"
-#include "src/utils/Utils.h"
+#include "../config/Config.h"
+#include "../auth/AuthManager.h"
+#include "../network/WirelessNetworkManager.h"
+#include "../hardware/GPIOManager.h"
+#include "../hardware/IRManager.h"
+#include "../storage/StorageManager.h"
+#include "../utils/Utils.h"
 
 #ifdef ARDUINO_ARCH_ESP8266
     typedef ESP8266WebServer WebServerType;

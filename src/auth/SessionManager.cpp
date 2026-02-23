@@ -1,9 +1,9 @@
 #include "SessionManager.h"
-#include "src/storage/StorageManager.h"
-#include "src/utils/Utils.h"
+#include "../storage/StorageManager.h"
+#include "../utils/Utils.h"
 #include <ArduinoJson.h>
 
-Session SessionManager::currentSession;
+AuthSession SessionManager::currentSession;
 
 void SessionManager::begin() {
     Utils::printSerial(F("## Initialize Session Manager."));
@@ -79,14 +79,13 @@ void SessionManager::invalidateSession() {
     currentSession.expiryTime = 0;
     currentSession.isValid = false;
     
-    // Delete from flash
-    String sessionFile = String(FPSTR(Config::SESSION_FILE));
-    StorageManager::deleteFile(sessionFile.c_str());
+    // Delete from flash storage
+    StorageManager::deleteFile(Config::SESSION_FILE);
     
     Utils::printSerial(F("Session invalidated."));
 }
 
-Session SessionManager::getCurrentSession() {
+AuthSession SessionManager::getCurrentSession() {
     return currentSession;
 }
 
@@ -186,16 +185,14 @@ bool SessionManager::saveSession() {
     doc["token"] = currentSession.token;
     doc["expiry"] = currentSession.expiryTime;
     doc["valid"] = currentSession.isValid;
-    
-    String sessionFile = String(FPSTR(Config::SESSION_FILE));
-    return StorageManager::writeJson(sessionFile.c_str(), doc);
+
+    return StorageManager::writeJson(Config::SESSION_FILE, doc);
 }
 
 bool SessionManager::loadSession() {
     JsonDocument doc;
     
-    String sessionFile = String(FPSTR(Config::SESSION_FILE));
-    if (!StorageManager::readJson(sessionFile.c_str(), doc)) {
+    if (!StorageManager::readJson(Config::SESSION_FILE, doc)) {
         return false;
     }
     

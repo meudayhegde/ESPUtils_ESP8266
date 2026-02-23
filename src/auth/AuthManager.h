@@ -2,8 +2,8 @@
 #define AUTH_MANAGER_H
 
 #include <Arduino.h>
-#include "src/config/Config.h"
-#include "src/storage/StorageManager.h"
+#include "../config/Config.h"
+#include "../storage/StorageManager.h"
 #include "SessionManager.h"
 
 class AuthManager {

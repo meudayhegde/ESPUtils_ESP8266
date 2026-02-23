@@ -1,5 +1,5 @@
 #include "AuthManager.h"
-#include "src/utils/Utils.h"
+#include "../utils/Utils.h"
 
 UserConfig AuthManager::userConfig;
 
@@ -57,8 +57,8 @@ const String& AuthManager::getUsername() {
 }
 
 bool AuthManager::resetToDefault() {
-    userConfig.username = String(FPSTR(Config::DEVICE_NAME));
-    userConfig.password = String(FPSTR(Config::DEVICE_PASSWORD));
+    userConfig.username = Config::DEVICE_NAME;
+    userConfig.password = Config::DEVICE_PASSWORD;
     
     return StorageManager::saveUserConfig(userConfig);
 }

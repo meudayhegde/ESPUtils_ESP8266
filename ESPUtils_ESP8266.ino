@@ -73,7 +73,9 @@ void setup() {
     // Start HTTP server
     httpServer.begin();
     Utils::printSerial(F("## HTTP server started on port "), "");
-    Utils::printSerial(String(Config::HTTP_PORT).c_str());
+    char portBuffer[6];
+    snprintf(portBuffer, sizeof(portBuffer), "%u", Config::HTTP_PORT);
+    Utils::printSerial(portBuffer);
     
     // Setup OTA updates
     setupOTA();
@@ -81,9 +83,9 @@ void setup() {
     Utils::printSerial(F("\n========================================"));
     Utils::printSerial(F("System Initialization Complete"));
     Utils::printSerial(F("Device: "), "");
-    Utils::printSerial(FPSTR(Config::DEVICE_NAME));
+    Utils::printSerial(Config::DEVICE_NAME);
     Utils::printSerial(F("Device ID: "), "");
-    Utils::printSerial(Utils::getDeviceIDString().c_str());
+    Utils::printSerial(Utils::getDeviceIDString());
     Utils::printSerial(F("IP: "), "");
     Utils::printSerial(WirelessNetworkManager::getIPAddress().c_str());
     Utils::printSerial(F("MAC: "), "");

@@ -81,6 +81,7 @@ String IRManager::generateIRResult(const decode_results* results) {
     }
     
     output.replace(" ", "");
+
     return output;
 }
 
@@ -90,7 +91,7 @@ String IRManager::captureIR(bool multiCapture, WiFiClient& client) {
     irRecv->enableIRIn();
     
     char timeoutResponse[32];
-    snprintf(timeoutResponse, sizeof(timeoutResponse), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::TIMEOUT));
+    snprintf(timeoutResponse, sizeof(timeoutResponse), "{\"response\":\"%s\"}", ResponseMsg::TIMEOUT);
     String result = String(timeoutResponse);
     
     uint32_t startTime = millis();
@@ -100,7 +101,7 @@ String IRManager::captureIR(bool multiCapture, WiFiClient& client) {
     // Send initial progress
     char progressMsg[64];
     snprintf(progressMsg, sizeof(progressMsg), "{\"response\":\"%s\",\"value\":%d}", 
-             FPSTR_TO_CSTR(ResponseMsg::PROGRESS), Config::RECV_TIMEOUT_SEC);
+             ResponseMsg::PROGRESS, Config::RECV_TIMEOUT_SEC);
     client.println(progressMsg);
     client.flush();
     
@@ -113,7 +114,7 @@ String IRManager::captureIR(bool multiCapture, WiFiClient& client) {
         if (currentTime > previousTime) {
             Utils::setLED(HIGH);
             snprintf(progressMsg, sizeof(progressMsg), "{\"response\":\"%s\",\"value\":%d}", 
-                     FPSTR_TO_CSTR(ResponseMsg::PROGRESS), (Config::RECV_TIMEOUT_SEC - currentTime));
+                     ResponseMsg::PROGRESS, (Config::RECV_TIMEOUT_SEC - currentTime));
             client.println(progressMsg);
             client.flush();
             previousTime = currentTime;
@@ -129,7 +130,7 @@ String IRManager::captureIR(bool multiCapture, WiFiClient& client) {
                 client.flush();
                 
                 irRecv->enableIRIn();
-                snprintf(progressMsg, sizeof(progressMsg), "{\"response\":\"%s\"}", FPSTR_TO_CSTR(ResponseMsg::SUCCESS));
+                snprintf(progressMsg, sizeof(progressMsg), "{\"response\":\"%s\"}", ResponseMsg::SUCCESS);
                 result = String(progressMsg);
                 
                 // Reset timer for next capture

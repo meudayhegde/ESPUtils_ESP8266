@@ -1,5 +1,5 @@
 #include "WirelessNetworkManager.h"
-#include "src/utils/Utils.h"
+#include "../utils/Utils.h"
 #ifdef ARDUINO_ARCH_ESP8266
     #include <ESP8266mDNS.h>
 #elif ARDUINO_ARCH_ESP32

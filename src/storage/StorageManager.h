@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
-#include "src/config/Config.h"
+#include "../config/Config.h"
 
 class StorageManager {
 public:

@@ -8,8 +8,8 @@
 #include <IRtext.h>
 #include <IRutils.h>
 #include <ArduinoJson.h>
-#include "src/config/Config.h"
-#include "src/utils/Utils.h"
+#include "../config/Config.h"
+#include "../utils/Utils.h"
 
 #ifdef ARDUINO_ARCH_ESP8266
     #include <ESP8266WiFi.h>

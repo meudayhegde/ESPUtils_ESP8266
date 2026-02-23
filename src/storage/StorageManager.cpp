@@ -1,9 +1,13 @@
 #include "StorageManager.h"
-#include "src/utils/Utils.h"
+#include "../utils/Utils.h"
 
 bool StorageManager::begin() {
     Utils::printSerial(F("## Begin flash storage."));
+#ifdef ARDUINO_ARCH_ESP8266
+    return LittleFS.begin();
+#elif ARDUINO_ARCH_ESP32
     return LittleFS.begin(true);
+#endif
 }
 
 bool StorageManager::readJson(const char* filePath, JsonDocument& doc) {
@@ -100,8 +104,8 @@ bool StorageManager::format() {
     
     // Create empty GPIO config file
     Utils::printSerial(F("Creating File: "), "");
-    Utils::printSerial(FPSTR(Config::GPIO_CONFIG_FILE), "...  ");
-    if (!writeFile(FPSTR_TO_CSTR(Config::GPIO_CONFIG_FILE), "[]")) {
+    Utils::printSerial(Config::GPIO_CONFIG_FILE, "...  ");
+    if (!writeFile(Config::GPIO_CONFIG_FILE, "[]")) {
         Utils::printSerial(F("Failed!"));
         return false;
     }
@@ -113,16 +117,16 @@ bool StorageManager::format() {
 bool StorageManager::loadWirelessConfig(WirelessConfig& config) {
     JsonDocument doc;
     
-    if (!readJson(FPSTR_TO_CSTR(Config::WIFI_CONFIG_FILE), doc)) {
+    if (!readJson(Config::WIFI_CONFIG_FILE, doc)) {
         // Use defaults
         return false;
     }
     
-    config.mode = doc["mode"] | String(FPSTR(Config::DEFAULT_MODE));
-    config.stationSSID = doc["wifi_name"] | String(FPSTR(Config::DEVICE_NAME));
-    config.stationPSK = doc["wifi_pass"] | String(FPSTR(Config::DEVICE_PASSWORD));
-    config.apSSID = doc["ap_name"] | String(FPSTR(Config::DEVICE_NAME));
-    config.apPSK = doc["ap_pass"] | String(FPSTR(Config::DEVICE_PASSWORD));
+    config.mode = doc["mode"] | Config::DEFAULT_MODE;
+    config.stationSSID = doc["wifi_name"] | Config::DEVICE_NAME;
+    config.stationPSK = doc["wifi_pass"] | Config::DEVICE_PASSWORD;
+    config.apSSID = doc["ap_name"] | Config::DEVICE_NAME;
+    config.apPSK = doc["ap_pass"] | Config::DEVICE_PASSWORD;
     
     return true;
 }
@@ -136,19 +140,19 @@ bool StorageManager::saveWirelessConfig(const WirelessConfig& config) {
     doc["ap_name"] = config.apSSID;
     doc["ap_pass"] = config.apPSK;
     
-    return writeJson(FPSTR_TO_CSTR(Config::WIFI_CONFIG_FILE), doc);
+    return writeJson(Config::WIFI_CONFIG_FILE, doc);
 }
 
 bool StorageManager::loadUserConfig(UserConfig& config) {
     JsonDocument doc;
     
-    if (!readJson(FPSTR_TO_CSTR(Config::LOGIN_CREDENTIAL_FILE), doc)) {
+    if (!readJson(Config::LOGIN_CREDENTIAL_FILE, doc)) {
         // Use defaults
         return false;
     }
     
-    config.username = doc["username"] | String(FPSTR(Config::DEVICE_NAME));
-    config.password = doc["password"] | String(FPSTR(Config::DEVICE_PASSWORD));
+    config.username = doc["username"] | Config::DEVICE_NAME;
+    config.password = doc["password"] | Config::DEVICE_PASSWORD;
     
     return true;
 }
@@ -159,5 +163,5 @@ bool StorageManager::saveUserConfig(const UserConfig& config) {
     doc["username"] = config.username;
     doc["password"] = config.password;
     
-    return writeJson(FPSTR_TO_CSTR(Config::LOGIN_CREDENTIAL_FILE), doc);
+    return writeJson(Config::LOGIN_CREDENTIAL_FILE, doc);
 }

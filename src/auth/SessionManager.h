@@ -2,15 +2,15 @@
 #define SESSION_MANAGER_H
 
 #include <Arduino.h>
-#include "src/config/Config.h"
+#include "../config/Config.h"
 
 // Session structure
-struct Session {
+struct AuthSession {
     String token;
     unsigned long expiryTime; // Unix timestamp
     bool isValid;
     
-    Session() : token(""), expiryTime(0), isValid(false) {}
+    AuthSession() : token(""), expiryTime(0), isValid(false) {}
 };
 
 class SessionManager {
@@ -43,7 +43,7 @@ public:
      * @brief Get current session info
      * @return Current session structure
      */
-    static Session getCurrentSession();
+    static AuthSession getCurrentSession();
     
 private:
     /**
@@ -84,7 +84,7 @@ private:
      */
     static bool isSessionExpired();
     
-    static Session currentSession;
+    static AuthSession currentSession;
 };
 
 #endif // SESSION_MANAGER_H

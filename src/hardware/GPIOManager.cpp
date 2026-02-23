@@ -1,5 +1,5 @@
 #include "GPIOManager.h"
-#include "src/utils/Utils.h"
+#include "../utils/Utils.h"
 
 void GPIOManager::begin() {
     Utils::printSerial(F("## Apply GPIO settings."));
@@ -20,7 +20,7 @@ void GPIOManager::applyPinConfig(int pinNumber, const char* mode, int pinValue) 
 JsonDocument GPIOManager::loadGPIOConfigs() {
     JsonDocument doc;
     
-    File file = LittleFS.open(FPSTR_TO_CSTR(Config::GPIO_CONFIG_FILE), "r");
+    File file = LittleFS.open(Config::GPIO_CONFIG_FILE, "r");
     if (!file) {
         Utils::printSerial(F("GPIO config file not found, using defaults."));
         // Return empty array
@@ -45,12 +45,12 @@ bool GPIOManager::saveGPIOConfigs(const JsonDocument& doc) {
 }
 
 String GPIOManager::applyGPIO(int pinNumber, const char* mode, int pinValue) {
+    Utils::printSerial(F("Applying GPIO settings..."));
     JsonDocument doc = loadGPIOConfigs();
     JsonArray array = doc.as<JsonArray>();
     
     bool pinConfigExists = false;
     int returnPinValue = -1;
-    
     // Iterate through existing configs
     for (JsonVariant gpio : array) {
         int pin = gpio["pinNumber"];
@@ -106,7 +106,7 @@ String GPIOManager::applyGPIO(int pinNumber, const char* mode, int pinValue) {
 String GPIOManager::getGPIO(int pinNumber) {
     if (pinNumber == -1) {
         // Return all GPIO configs
-        String configs = StorageManager::readFile(FPSTR_TO_CSTR(Config::GPIO_CONFIG_FILE));
+        String configs = StorageManager::readFile(Config::GPIO_CONFIG_FILE);
         return configs.length() > 0 ? configs : F("[]");
     }
     

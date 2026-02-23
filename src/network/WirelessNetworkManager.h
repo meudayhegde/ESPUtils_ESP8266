@@ -8,8 +8,8 @@
     #include <WiFi.h>
 #endif
 #include <ArduinoJson.h>
-#include "src/config/Config.h"
-#include "src/storage/StorageManager.h"
+#include "../config/Config.h"
+#include "../storage/StorageManager.h"
 
 class WirelessNetworkManager {
 private:

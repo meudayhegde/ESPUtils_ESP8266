@@ -2,7 +2,7 @@
 #define UTILS_H
 
 #include <Arduino.h>
-#include "src/config/Config.h"
+#include "../config/Config.h"
 
 namespace Utils {
     /**
@@ -57,7 +57,7 @@ namespace Utils {
      * @brief Get device ID as formatted hex string
      * @return Device ID formatted as uppercase hex (e.g., "AABBCCDDEEFF")
      */
-    String getDeviceIDString();
+    char* getDeviceIDString();
 }
 
 #endif // UTILS_H
