@@ -142,26 +142,3 @@ bool StorageManager::saveWirelessConfig(const WirelessConfig& config) {
     
     return writeJson(Config::WIFI_CONFIG_FILE, doc);
 }
-
-bool StorageManager::loadUserConfig(UserConfig& config) {
-    JsonDocument doc;
-    
-    if (!readJson(Config::LOGIN_CREDENTIAL_FILE, doc)) {
-        // Use defaults
-        return false;
-    }
-    
-    config.username = doc["username"] | Config::DEVICE_NAME;
-    config.password = doc["password"] | Config::DEVICE_PASSWORD;
-    
-    return true;
-}
-
-bool StorageManager::saveUserConfig(const UserConfig& config) {
-    JsonDocument doc;
-    
-    doc["username"] = config.username;
-    doc["password"] = config.password;
-    
-    return writeJson(Config::LOGIN_CREDENTIAL_FILE, doc);
-}

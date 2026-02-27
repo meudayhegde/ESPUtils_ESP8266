@@ -7,6 +7,10 @@
 // Device Configuration
 // ================================
 namespace Config {
+    const char FIRMWARE_VERSION[] = "{{--@FIRMWARE_VERSION@--}}";
+    // const char DEVICE_SECRET_KEY[] = "{{--@DEVICE_SECRET_KEY@--}}";
+    const char JWT_PUB_KEY[] = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIAnXvd2yBqvGfsjTi4cAQ0hYkaRi\n/MqU8VSHyIBzErl8L2A2SERAXb6Epvjv4Zb5nu78LiIfkuB6gJvMj/fUrA==\n-----END PUBLIC KEY-----";
+    
     // Device Identity
     const char DEVICE_NAME[] = "ESPUtils";
     const char DEVICE_PASSWORD[] = "ESP.device@8266";
@@ -57,12 +61,6 @@ namespace Config {
 // ================================
 // Data Structures
 // ================================
-struct UserConfig {
-    String username;
-    String password;
-    
-    UserConfig() : username(Config::DEVICE_NAME), password(Config::DEVICE_PASSWORD) {}
-};
 
 struct WirelessConfig {
     String mode;

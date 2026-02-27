@@ -29,9 +29,7 @@ void ESPCommandHandler::setupRoutes(WebServerType& server) {
     server.on("/api/wireless", HTTP_GET, [&server]() { 
         withLEDIndicator(server, handleGetWireless); 
     });
-    server.on("/api/user", HTTP_PUT, [&server]() { 
-        withLEDIndicator(server, handleSetUser); 
-    });
+
     server.on("/api/gpio/set", HTTP_POST, [&server]() { 
         withLEDIndicator(server, handleGPIOSet); 
     });
@@ -101,6 +99,7 @@ void ESPCommandHandler::handlePing(WebServerType& server) {
     doc["deviceID"] = Utils::getDeviceIDString();
     doc["ipAddress"] = WirelessNetworkManager::getIPAddress();
     doc["deviceName"] = Config::DEVICE_NAME;
+    doc["challenge"] = SessionManager::getCurrentChallenge();
     
     String response;
     serializeJson(doc, response);
@@ -136,8 +135,11 @@ void ESPCommandHandler::handleAuth(WebServerType& server) {
         return;
     }
     
+    // Copy JWT token into a String before doc goes out of scope or is referenced later
+    String jwtTokenStr = String(jwtToken);
+    
     // Authenticate with JWT and get session token
-    String sessionToken = AuthManager::authenticateWithJWT(jwtToken);
+    String sessionToken = AuthManager::authenticateWithJWT(jwtTokenStr);
     
     if (sessionToken.length() == 0) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
@@ -331,50 +333,6 @@ void ESPCommandHandler::handleGetWireless(WebServerType& server) {
     sendSuccess(server, config);
 }
 
-void ESPCommandHandler::handleSetUser(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/user PUT request"));
-    
-    if (!validateSessionToken(server)) {
-        sendError(server, 401, ResponseMsg::UNAUTHORIZED);
-        return;
-    }
-    
-    if (!server.hasArg("plain")) {
-        sendError(server, 400, ResponseMsg::JSON_ERROR);
-        return;
-    }
-    
-    String body = server.arg("plain");
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, body);
-    
-    if (error) {
-        sendError(server, 400, ResponseMsg::JSON_ERROR);
-        return;
-    }
-    
-    const char* newUsername = doc["username"] | "";
-    const char* newPassword = doc["password"] | "";
-    
-    if (strlen(newUsername) == 0 || strlen(newPassword) == 0) {
-        sendError(server, 400, "Invalid username or password");
-        return;
-    }
-    
-    if (AuthManager::updateCredentials(newUsername, newPassword)) {
-        JsonDocument responseDoc;
-        responseDoc["response"] = ResponseMsg::SUCCESS;
-        responseDoc["message"] = "User credentials updated";
-        
-        String response;
-        serializeJson(responseDoc, response);
-        
-        sendSuccess(server, response);
-    } else {
-        sendError(server, 500, ResponseMsg::FAILURE);
-    }
-}
-
 void ESPCommandHandler::handleGPIOSet(WebServerType& server) {
     Utils::printSerial(F("Handling /api/gpio/set request"));
     
@@ -457,8 +415,6 @@ void ESPCommandHandler::handleReset(WebServerType& server) {
     
     if (success) {
         // Reset credentials and wireless to defaults
-        AuthManager::resetToDefault();
-        
         WirelessConfig defaultConfig;
         StorageManager::saveWirelessConfig(defaultConfig);
         

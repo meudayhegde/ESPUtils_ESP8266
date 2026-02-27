@@ -18,6 +18,7 @@
 #include "src/utils/Utils.h"
 #include "src/storage/StorageManager.h"
 #include "src/auth/AuthManager.h"
+#include "src/auth/SessionManager.h"
 #include "src/network/WirelessNetworkManager.h"
 #include "src/hardware/GPIOManager.h"
 #include "src/hardware/IRManager.h"
@@ -60,7 +61,7 @@ void setup() {
     // Initialize IR receiver and sender
     IRManager::begin();
     
-    // Load user credentials
+    // Load auth module
     AuthManager::begin();
     
     // Get device ID for mDNS
@@ -160,6 +161,9 @@ void loop() {
     
     // Handle HTTP requests
     httpServer.handleClient();
+    
+    // Update challenge string (auto-refreshes every 5 minutes)
+    SessionManager::updateChallenge();
     
     // Handle mDNS (both platforms benefit from periodic updates)
     #ifdef ARDUINO_ARCH_ESP8266

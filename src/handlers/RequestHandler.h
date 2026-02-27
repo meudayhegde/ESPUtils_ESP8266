@@ -12,6 +12,7 @@
 #endif
 #include "../config/Config.h"
 #include "../auth/AuthManager.h"
+#include "../auth/SessionManager.h"
 #include "../network/WirelessNetworkManager.h"
 #include "../hardware/GPIOManager.h"
 #include "../hardware/IRManager.h"

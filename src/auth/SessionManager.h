@@ -45,26 +45,33 @@ public:
      */
     static AuthSession getCurrentSession();
     
-private:
     /**
-     * @brief Verify ES256 JWT token signature
-     * @param jwtToken JWT token to verify
-     * @return true if signature is valid, false otherwise
+     * @brief Get current challenge string
+     * @return Current challenge string (auto-refreshes every 5 minutes)
      */
-    static bool verifyJWTSignature(const String& jwtToken);
+    static String getCurrentChallenge();
     
     /**
-     * @brief Parse and validate JWT payload
-     * @param jwtToken JWT token to parse
-     * @return true if payload is valid, false otherwise
+     * @brief Check if challenge needs refresh and update if needed
+     * Called periodically to maintain fresh challenge
      */
-    static bool parseJWTPayload(const String& jwtToken);
+    static void updateChallenge();
+    
+private:
+    static void   initPublicKey();
+    static bool   verifyAndParseJWT(const char* jwt, size_t len);
     
     /**
      * @brief Generate a random session token
      * @return Random session token string
      */
     static String generateSessionToken();
+    
+    /**
+     * @brief Generate a random challenge string
+     * @return Random 8-character challenge string
+     */
+    static String generateChallengeString();
     
     /**
      * @brief Save session to flash storage
@@ -85,6 +92,9 @@ private:
     static bool isSessionExpired();
     
     static AuthSession currentSession;
+    static String challengeString;
+    static unsigned long challengeGeneratedTime;
+    static const unsigned long CHALLENGE_REFRESH_INTERVAL = 300000; // 5 minutes in milliseconds
 };
 
 #endif // SESSION_MANAGER_H

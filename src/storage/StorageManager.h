@@ -78,20 +78,6 @@ public:
      * @return true if successful, false otherwise
      */
     static bool saveWirelessConfig(const WirelessConfig& config);
-    
-    /**
-     * @brief Load user credentials from file
-     * @param config UserConfig struct to populate
-     * @return true if successful, false otherwise
-     */
-    static bool loadUserConfig(UserConfig& config);
-    
-    /**
-     * @brief Save user credentials to file
-     * @param config UserConfig struct to save
-     * @return true if successful, false otherwise
-     */
-    static bool saveUserConfig(const UserConfig& config);
 };
 
 #endif // STORAGE_MANAGER_H
