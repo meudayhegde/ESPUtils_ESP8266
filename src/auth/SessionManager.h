@@ -56,6 +56,14 @@ public:
      * Called periodically to maintain fresh challenge
      */
     static void updateChallenge();
+
+    /**
+     * @brief Run deferred tasks (call from loop())
+     * Saves session to flash if a write is pending.
+     */
+    static void tick();
+
+    static String createSession();
     
 private:
     static void   initPublicKey();
@@ -95,6 +103,7 @@ private:
     static String challengeString;
     static unsigned long challengeGeneratedTime;
     static const unsigned long CHALLENGE_REFRESH_INTERVAL = 300000; // 5 minutes in milliseconds
+    static bool pendingSave;  // deferred flash write flag
 };
 
 #endif // SESSION_MANAGER_H

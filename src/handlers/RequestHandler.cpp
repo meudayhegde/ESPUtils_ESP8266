@@ -77,11 +77,16 @@ bool ESPCommandHandler::validateSessionToken(WebServerType& server) {
 void ESPCommandHandler::sendError(WebServerType& server, int code, const char* message) {
     JsonDocument doc;
     doc["error"] = message;
-    
-    String response;
-    serializeJson(doc, response);
-    
-    server.send(code, "application/json", response);
+    sendJsonResponse(server, code, doc);
+}
+
+void ESPCommandHandler::sendJsonResponse(WebServerType& server, int code, JsonDocument& doc) {
+    // measureJson counts bytes without allocating; serializeJson streams directly
+    // to the TCP client — no intermediate String ever touches the heap.
+    size_t len = measureJson(doc);
+    server.setContentLength(len);
+    server.send(code, "application/json", "");
+    serializeJson(doc, server.client());
 }
 
 void ESPCommandHandler::sendSuccess(WebServerType& server, const String& data) {
@@ -96,15 +101,12 @@ void ESPCommandHandler::handlePing(WebServerType& server) {
     Utils::printSerial(F("Handling /ping request"));
     
     JsonDocument doc;
-    doc["deviceID"] = Utils::getDeviceIDString();
-    doc["ipAddress"] = WirelessNetworkManager::getIPAddress();
+    doc["deviceID"]   = Utils::getDeviceIDString();
+    doc["ipAddress"]  = WirelessNetworkManager::getIPAddress();
     doc["deviceName"] = Config::DEVICE_NAME;
-    doc["challenge"] = SessionManager::getCurrentChallenge();
+    doc["challenge"]  = SessionManager::getCurrentChallenge();
     
-    String response;
-    serializeJson(doc, response);
-    
-    sendSuccess(server, response);
+    sendJsonResponse(server, 200, doc);
 }
 
 // ================================
@@ -113,48 +115,44 @@ void ESPCommandHandler::handlePing(WebServerType& server) {
 
 void ESPCommandHandler::handleAuth(WebServerType& server) {
     Utils::printSerial(F("Handling /api/auth request"));
-    
+
     if (!server.hasArg("plain")) {
         sendError(server, 400, ResponseMsg::JSON_ERROR);
         return;
     }
-    
-    String body = server.arg("plain");
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, body);
-    
-    if (error) {
-        sendError(server, 400, ResponseMsg::JSON_ERROR);
-        return;
-    }
-    
-    const char* jwtToken = doc["token"] | "";
-    
-    if (strlen(jwtToken) == 0) {
-        sendError(server, 400, "JWT token required");
-        return;
-    }
-    
-    // Copy JWT token into a String before doc goes out of scope or is referenced later
-    String jwtTokenStr = String(jwtToken);
-    
-    // Authenticate with JWT and get session token
-    String sessionToken = AuthManager::authenticateWithJWT(jwtTokenStr);
-    
+
+    // Scope the request body + JsonDocument so they are freed from heap
+    // before the crypto call.
+    String jwtTokenStr;
+    {
+        String body = server.arg("plain");
+        JsonDocument doc;
+        if (deserializeJson(doc, body) != DeserializationError::Ok) {
+            sendError(server, 400, ResponseMsg::JSON_ERROR);
+            return;
+        }
+        const char* jwtToken = doc["token"] | "";
+        if (strlen(jwtToken) == 0) {
+            sendError(server, 400, "JWT token required");
+            return;
+        }
+        jwtTokenStr = jwtToken;
+    }  // body + doc freed here
+
+    String sessionToken = AuthManager::authenticateWithJWT(
+        jwtTokenStr.c_str(), jwtTokenStr.length());
+    jwtTokenStr = "";  // free heap
+
     if (sessionToken.length() == 0) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
         return;
     }
-    
-    // Return session token
-    JsonDocument responseDoc;
-    responseDoc["sessionToken"] = sessionToken;
-    responseDoc["expiresIn"] = Config::SESSION_EXPIRY_SECONDS;
-    
-    String response;
-    serializeJson(responseDoc, response);
-    
-    sendSuccess(server, response);
+
+    JsonDocument respDoc;
+    respDoc["sessionToken"] = sessionToken;
+    respDoc["expiresIn"]    = Config::SESSION_EXPIRY_SECONDS;
+    sessionToken = "";
+    sendJsonResponse(server, 200, respDoc);
 }
 
 // ================================
@@ -170,25 +168,22 @@ void ESPCommandHandler::handleDeviceInfo(WebServerType& server) {
     }
     
     JsonDocument doc;
-    doc["deviceName"] = Config::DEVICE_NAME;
-    doc["deviceID"] = Utils::getDeviceIDString();
-    doc["macAddress"] = WirelessNetworkManager::getMacAddress();
-    doc["ipAddress"] = WirelessNetworkManager::getIPAddress();
+    doc["deviceName"]     = Config::DEVICE_NAME;
+    doc["deviceID"]       = Utils::getDeviceIDString();
+    doc["macAddress"]     = WirelessNetworkManager::getMacAddress();
+    doc["ipAddress"]      = WirelessNetworkManager::getIPAddress();
     
 #ifdef ARDUINO_ARCH_ESP8266
-    doc["platform"] = F("ESP8266");
+    doc["platform"]       = F("ESP8266");
     doc["deviceIDDecimal"] = (uint32_t)Utils::getDeviceID();
 #elif ARDUINO_ARCH_ESP32
-    doc["platform"] = F("ESP32");
+    doc["platform"]       = F("ESP32");
     doc["deviceIDDecimal"] = (uint32_t)(Utils::getDeviceID() & 0xFFFFFFFF);
 #endif
     
-    doc["wirelessMode"] = WirelessNetworkManager::getWirelessConfig().mode;
+    doc["wirelessMode"]   = WirelessNetworkManager::getWirelessConfig().mode;
     
-    String response;
-    serializeJson(doc, response);
-    
-    sendSuccess(server, response);
+    sendJsonResponse(server, 200, doc);
 }
 
 void ESPCommandHandler::handleIRCapture(WebServerType& server) {
@@ -310,12 +305,8 @@ void ESPCommandHandler::handleSetWireless(WebServerType& server) {
     if (WirelessNetworkManager::updateWirelessConfig(wirelessMode, newSSID, newPass)) {
         JsonDocument responseDoc;
         responseDoc["response"] = ResponseMsg::SUCCESS;
-        responseDoc["message"] = "Wireless config updated";
-        
-        String response;
-        serializeJson(responseDoc, response);
-        
-        sendSuccess(server, response);
+        responseDoc["message"]  = "Wireless config updated";
+        sendJsonResponse(server, 200, responseDoc);
     } else {
         sendError(server, 500, ResponseMsg::FAILURE);
     }
@@ -393,11 +384,7 @@ void ESPCommandHandler::handleRestart(WebServerType& server) {
     
     JsonDocument responseDoc;
     responseDoc["response"] = "restarting";
-    
-    String response;
-    serializeJson(responseDoc, response);
-    
-    sendSuccess(server, response);
+    sendJsonResponse(server, 200, responseDoc);
     
     delay(100);
     ESP.restart();
@@ -423,9 +410,5 @@ void ESPCommandHandler::handleReset(WebServerType& server) {
     
     JsonDocument responseDoc;
     responseDoc["response"] = success ? ResponseMsg::SUCCESS : ResponseMsg::FAILURE;
-    
-    String response;
-    serializeJson(responseDoc, response);
-    
-    sendSuccess(server, response);
+    sendJsonResponse(server, 200, responseDoc);
 }

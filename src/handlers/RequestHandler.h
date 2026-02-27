@@ -61,11 +61,15 @@ private:
      * @param message Error message
      */
     static void sendError(WebServerType& server, int code, const char* message);
-    
+
     /**
-     * @brief Send JSON success response
-     * @param server WebServer instance
-     * @param data JSON data to send
+     * @brief Stream a JsonDocument directly to the TCP client — zero intermediate String allocation.
+     *        Uses measureJson() + serializeJson() so the full JSON is never held in RAM.
+     */
+    static void sendJsonResponse(WebServerType& server, int code, JsonDocument& doc);
+
+    /**
+     * @brief Send JSON success response (pre-built string — IR/GPIO results)
      */
     static void sendSuccess(WebServerType& server, const String& data);
     

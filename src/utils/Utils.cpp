@@ -2,26 +2,6 @@
 
 namespace Utils {
     
-    size_t printSerial(const String& message, const char* end) {
-        if (!Config::SERIAL_MONITOR_ENABLED) return 0;
-        size_t len = Serial.print(message) + Serial.print(end);
-        delay(50); // Small delay to ensure message is printed before any potential reset
-        return len;
-    }
-    
-    size_t printSerial(const char* message, const char* end) {
-        if (!Config::SERIAL_MONITOR_ENABLED) return 0;
-        size_t len =  Serial.print(message) + Serial.print(end);
-        delay(50); // Small delay to ensure message is printed before any potential reset
-        return len;
-    }
-    
-    size_t printSerial(const __FlashStringHelper* message, const char* end) {
-        if (!Config::SERIAL_MONITOR_ENABLED) return 0;
-        size_t len = Serial.print(message) + Serial.print(end);
-        delay(50); // Small delay to ensure message is printed before any potential reset
-        return len;
-    }
     
     void ledPulse(int onTimeMs, int offTimeMs, int count) {
         for (int i = 0; i < count; i++) {

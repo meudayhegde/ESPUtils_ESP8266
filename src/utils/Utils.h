@@ -7,13 +7,15 @@
 namespace Utils {
     /**
      * @brief Print message to serial if enabled
-     * @param message Message to print
-     * @param end End character (default: newline)
+     * @param message Message to print (any type supported by Serial.print)
+     * @param end End character/string (default: newline)
      * @return Number of bytes written
      */
-    size_t printSerial(const String& message, const char* end = "\n");
-    size_t printSerial(const char* message, const char* end = "\n");
-    size_t printSerial(const __FlashStringHelper* message, const char* end = "\n");
+    template<typename T, typename U = const char*>
+    size_t printSerial(T message, U end = "\n") {
+        if (!Config::SERIAL_MONITOR_ENABLED) return 0;
+        return Serial.print(message) + Serial.print(end);
+    }
     
     /**
      * @brief Pulse LED for visual feedback
