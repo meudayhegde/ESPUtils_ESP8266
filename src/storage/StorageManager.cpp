@@ -4,6 +4,12 @@
 bool StorageManager::begin() {
     Utils::printSerial(F("## Begin flash storage."));
 #ifdef ARDUINO_ARCH_ESP8266
+    if (LittleFS.begin()) {
+        return true;
+    }
+    // Filesystem not formatted (e.g. first boot after flash) — format and retry
+    Utils::printSerial(F("LittleFS mount failed, formatting..."));
+    LittleFS.format();
     return LittleFS.begin();
 #elif ARDUINO_ARCH_ESP32
     return LittleFS.begin(true);

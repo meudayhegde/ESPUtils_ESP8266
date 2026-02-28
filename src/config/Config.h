@@ -27,8 +27,11 @@ namespace Config {
     constexpr uint8_t IR_SEND_PIN = 4;
     
     // Network Ports
-    constexpr uint16_t HTTP_PORT = 80;
-    constexpr uint16_t OTA_PORT = 48325;
+    constexpr uint16_t HTTP_PORT          = 80;
+    constexpr uint16_t OTA_PORT           = 48325;
+    // Camera stream port (ESP32 only) — the embedded camera HTML/JS
+    // constructs the stream URL as  document.location.origin + ':81'
+    constexpr uint16_t CAMERA_STREAM_PORT = 81;   // MJPEG stream (hardcoded in JS)
     
     // Timing Configuration
     constexpr uint8_t RECV_TIMEOUT_SEC = 8;
@@ -47,6 +50,21 @@ namespace Config {
     constexpr uint16_t CAPTURE_BUFFER_SIZE = 1024;
     constexpr uint16_t IR_FREQUENCY = 38000;
     constexpr uint8_t MIN_UNKNOWN_SIZE = 12;
+    
+    // Camera Configuration (ESP32 only)
+    constexpr uint32_t CAMERA_XCLK_FREQ_HZ = 20000000;  // 20 MHz
+    
+    // Range Extender Configuration
+    // ESP8266: lwIP NAPT table sizes (heap-limited; default 1000/10 is a safe choice)
+    constexpr uint16_t NAPT_TABLE_SIZE = 1000;
+    constexpr uint16_t NAPT_PORT_TABLE_SIZE = 10;
+    // AP-side address used by the range-extender soft-AP (Android-compatible Google subnet)
+    const uint8_t RANGE_EXT_AP_IP[4]      = { 172, 217, 28, 254 };
+    const uint8_t RANGE_EXT_AP_SUBNET[4]  = { 255, 255, 255, 0  };
+    // ESP32 AP-side defaults
+    const uint8_t RANGE_EXT32_AP_IP[4]       = { 192, 168,  4, 1 };
+    const uint8_t RANGE_EXT32_AP_LEASE[4]    = { 192, 168,  4, 2 };
+    const uint8_t RANGE_EXT32_AP_DNS[4]      = {   8,   8,  4, 4 };
     
     // Protocol Configuration
     constexpr uint16_t MAX_REQUEST_LENGTH = 5120;

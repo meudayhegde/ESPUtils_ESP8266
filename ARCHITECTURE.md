@@ -65,6 +65,12 @@ All protected endpoints require the header: `Authorization: Session <session-tok
 - **POST /api/restart** - Restart the device
 - **POST /api/reset** - Factory reset the device
 
+#### Camera Endpoints (ESP32 only — no authentication)
+Served by the ESP-IDF `httpd` stack on separate ports. See §CameraHandler above for the full table.
+
+- **Port 81** — `GET /` (web UI), `/capture`, `/bmp`, `/status`, `/control`, `/xclk`, `/reg`, `/greg`, `/pll`, `/resolution`
+- **Port 82** — `GET /stream` (MJPEG)
+
 ## File Structure
 
 ```
@@ -91,10 +97,17 @@ ESPUtils_ESP8266/
     │   ├── GPIOManager.h         # GPIO declarations
     │   ├── GPIOManager.cpp       # GPIO control logic
     │   ├── IRManager.h           # IR declarations
-    │   └── IRManager.cpp         # IR capture & transmission
+    │   ├── IRManager.cpp         # IR capture & transmission
+    │   ├── CameraManager.h       # Camera init declarations (ESP32 only)
+    │   ├── CameraManager.cpp     # esp_camera_init & sensor tweaks
+    │   ├── board_config.h        # Camera board model selection
+    │   ├── camera_pins.h         # Pin definitions for each camera board
+    │   └── camera_index.h        # Embedded gzip'd camera control web UI
     └── handlers/
         ├── RequestHandler.h      # HTTP REST API declarations
-        └── RequestHandler.cpp    # RESTful endpoint routing logic
+        ├── RequestHandler.cpp    # RESTful endpoint routing logic
+        ├── CameraHandler.h       # Camera HTTP server declarations (ESP32 only)
+        └── CameraHandler.cpp     # MJPEG stream + camera control endpoints
 ```
 
 ## Module Descriptions
@@ -108,8 +121,8 @@ The codebase follows **Separation of Concerns (SoC)** with a clean folder struct
 - **`src/storage/`** - File system and persistent storage operations
 - **`src/auth/`** - JWT authentication, session management, and credential management
 - **`src/network/`** - Wireless networking (WiFi/AP) and mDNS service discovery
-- **`src/hardware/`** - Hardware interfaces (GPIO, IR)
-- **`src/handlers/`** - HTTP REST API endpoint routing and request handling
+- **`src/hardware/`** - Hardware interfaces (GPIO, IR, Camera)
+- **`src/handlers/`** - HTTP REST API endpoint routing and request handling (including camera server)
 
 Each folder contains the header (`.h`) and implementation (`.cpp`) files for that concern.
 
@@ -211,6 +224,45 @@ HTTP REST API endpoint routing and request processing:
 - Helper methods for sending responses
 
 **Benefits**: Clean API structure, easy to add new endpoints, follows REST principles
+
+### 9. **CameraManager Module** (`src/hardware/`) — *ESP32 only*
+Camera sensor initialisation and configuration:
+- Wraps `esp_camera_init()` with PSRAM-aware defaults
+- Applies sensor-specific post-init tweaks (OV3660 flip/brightness, etc.)
+- Guards entire module with `#ifdef ARDUINO_ARCH_ESP32`
+- Exposes `begin()` (returns bool) and `isInitialised()` helpers
+
+**Board support**: Configured via `board_config.h` — uncomment one model macro to match your hardware.
+
+**Benefits**: Camera hardware cleanly separated from HTTP layer; graceful degradation if no camera is present
+
+### 10. **CameraHandler Module** (`src/handlers/`) — *ESP32 only*
+Camera control and streaming, integrated with the main HTTP server:
+- Camera control routes are registered on the main Arduino WebServer (port 80)
+- MJPEG stream runs on a dedicated ESP-IDF `httpd` server:
+  - **Port 81** (`Config::CAMERA_STREAM_PORT`) — continuous MJPEG stream
+- Adapted from the official ESP32 `CameraWebServer` Arduino example
+- Serves a gzip-compressed camera control web page from `camera_index.h`
+- LED flash management via LEDC PWM
+- Running-average FPS filter for stream diagnostics
+
+**Camera API endpoints** (no authentication — local network only):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Camera control web UI |
+| GET | `/status` | JSON sensor status (all parameters) |
+| GET | `/control?var=<name>&val=<value>` | Set sensor parameter (framesize, quality, brightness, …) |
+| GET | `/capture` | Single JPEG snapshot |
+| GET | `/bmp` | Single BMP snapshot |
+| GET | `/xclk?xclk=<MHz>` | Set XCLK frequency |
+| GET | `/reg?reg=&mask=&val=` | Write sensor register |
+| GET | `/greg?reg=&mask=` | Read sensor register |
+| GET | `/pll?bypass=&mul=&…` | PLL configuration |
+| GET | `/resolution?sx=&sy=&…` | Custom resolution window |
+| GET | `:81/stream` | MJPEG continuous stream |
+
+**Benefits**: Camera functionality fully contained in its own module; independent of the auth/session layer
 
 ## Best Practices Implemented
 

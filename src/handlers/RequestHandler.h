@@ -14,8 +14,8 @@
 #include "../auth/AuthManager.h"
 #include "../auth/SessionManager.h"
 #include "../network/WirelessNetworkManager.h"
-#include "../hardware/GPIOManager.h"
-#include "../hardware/IRManager.h"
+#include "../hardware/gpio/GPIOManager.h"
+#include "../hardware/infrared/IRManager.h"
 #include "../storage/StorageManager.h"
 #include "../utils/Utils.h"
 

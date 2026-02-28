@@ -3,8 +3,8 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include "../config/Config.h"
-#include "../storage/StorageManager.h"
+#include "../../config/Config.h"
+#include "../../storage/StorageManager.h"
 
 class GPIOManager {
 public:

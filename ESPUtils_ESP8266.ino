@@ -10,6 +10,8 @@
     #include <WiFi.h>
     #include <WebServer.h>
     #include <ESPmDNS.h>
+    #include "src/hardware/camera/board_config.h"
+    
     typedef WebServer WebServerType;
 #endif
 
@@ -20,11 +22,17 @@
 #include "src/auth/AuthManager.h"
 #include "src/auth/SessionManager.h"
 #include "src/network/WirelessNetworkManager.h"
-#include "src/hardware/GPIOManager.h"
-#include "src/hardware/IRManager.h"
+#include "src/hardware/gpio/GPIOManager.h"
+#include "src/hardware/infrared/IRManager.h"
 #include "src/handlers/RequestHandler.h"
 
-// HTTP Server
+// Camera Module (only on ESP32 boards with a camera — ESP_CAM_ENABLED set by board_config.h)
+#if defined(ESP_CAM_ENABLED)
+#include "src/hardware/camera/CameraManager.h"
+#include "src/handlers/CameraHandler.h"
+#endif
+
+// HTTP Server — single server on port 80 for both REST API and camera control
 WebServerType httpServer(Config::HTTP_PORT);
 
 /**
@@ -49,7 +57,9 @@ void setup() {
     Utils::initLED();
     
     // Initialize file system
-    StorageManager::begin();
+    if (!StorageManager::begin()) {
+        Utils::printSerial(F("WARNING: Storage (LittleFS) failed to mount. Config will not persist!"));
+    }
     
     // Initialize GPIO manager and apply stored settings
     GPIOManager::begin();
@@ -77,6 +87,22 @@ void setup() {
     char portBuffer[6];
     snprintf(portBuffer, sizeof(portBuffer), "%u", Config::HTTP_PORT);
     Utils::printSerial(portBuffer);
+
+    // Initialise camera (only on boards with ESP_CAM_ENABLED)
+#if defined(ESP_CAM_ENABLED)
+    Utils::printSerial(F("## Initialising Camera module."));
+    if (CameraManager::begin()) {
+        CameraHandler::setupLedFlash();
+        CameraHandler::setupRoutes(httpServer);
+        CameraHandler::startStreamServer();
+        Utils::printSerial(F("\nCamera UI:     http://"), "");
+        Utils::printSerial(WirelessNetworkManager::getIPAddress().c_str(), "");
+        Utils::printSerial(F("\nCamera stream: http://"), "");
+        Utils::printSerial(WirelessNetworkManager::getIPAddress().c_str(), ":81/stream");
+    } else {
+        Utils::printSerial(F("Camera module skipped (init failed)."));
+    }
+#endif
     
     // Setup OTA updates
     setupOTA();

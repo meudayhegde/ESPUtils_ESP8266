@@ -33,6 +33,8 @@ void WirelessNetworkManager::initWireless() {
     const char* apName = wirelessConfig.apSSID.c_str();
     const char* apPassword = wirelessConfig.apPSK.c_str();
     
+    Utils::printSerial(F("Wireless mode:"), F(""));
+    Utils::printSerial(mode);
     // Try WiFi Station mode
     if (strcmp(mode, "WIFI") == 0) {
         WiFi.mode(WIFI_STA);
@@ -69,6 +71,12 @@ void WirelessNetworkManager::initWireless() {
         Utils::printSerial(F("WiFi connection timeout."));
     }
     
+    // Range Extender: STA connected to router + NATed soft-AP
+    if (strcmp(mode, "AP_STA") == 0) {
+        initRangeExtender();
+        return;
+    }
+
     // Fall back to AP mode or if mode is already AP
     WiFi.mode(WIFI_AP);
     Utils::printSerial(F("Beginning SoftAP \""), "");
@@ -82,6 +90,177 @@ void WirelessNetworkManager::initWireless() {
     }
     
     Utils::ledPulse(1000, 2000, 3);
+}
+
+// ================================
+// Range Extender
+// ================================
+
+#ifdef ARDUINO_ARCH_ESP32
+void WirelessNetworkManager::onRangeExtenderEvent(arduino_event_id_t event, arduino_event_info_t info) {
+    switch (event) {
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+            Utils::printSerial(F("[RangeExt] STA got IP — enabling NAPT on AP."));
+            WiFi.AP.enableNAPT(true);
+            break;
+        case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+            Utils::printSerial(F("[RangeExt] STA disconnected — disabling NAPT."));
+            WiFi.AP.enableNAPT(false);
+            break;
+        default:
+            break;
+    }
+}
+#endif
+
+void WirelessNetworkManager::initRangeExtender() {
+    Utils::printSerial(F("## Initializing Range Extender (STA + NATed AP)."));
+
+    const char* staSsid = wirelessConfig.stationSSID.c_str();
+    const char* staPsk  = wirelessConfig.stationPSK.c_str();
+    const char* apSsid  = wirelessConfig.apSSID.c_str();
+    const char* apPsk   = wirelessConfig.apPSK.c_str();
+
+#if defined(ARDUINO_ARCH_ESP8266) && defined(RANGE_EXTENDER_NAPT_SUPPORTED)
+    // ----- ESP8266 approach: lwIP NAPT -----
+
+    // Step 1: Connect STA to the upstream router first so we can read the
+    //         real DNS server before the DHCP server is configured.
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(staSsid, staPsk);
+
+    Utils::printSerial(F("[RangeExt] Connecting STA to \""), "");
+    Utils::printSerial(staSsid, "\"...");
+    Serial.println();
+
+    bool staConnected = false;
+    for (int i = 0; i < Config::WIRELESS_TIMEOUT_SEC * 2; i++) {
+        Utils::setLED(LOW);
+        if (WiFi.status() == WL_CONNECTED) {
+            staConnected = true;
+            break;
+        }
+        Utils::printSerial(F("."), "");
+        delay(50);
+        Utils::setLED(HIGH);
+        delay(450);
+    }
+    Serial.println();
+
+    if (!staConnected) {
+        Utils::printSerial(F("[RangeExt] STA connection timed out — falling back to AP mode."));
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP(apSsid, apPsk, 1, 0, 5);
+        Utils::ledPulse(1000, 2000, 3);
+        return;
+    }
+
+    Utils::printSerial(F("[RangeExt] STA connected. IP: "), "");
+    if (Config::SERIAL_MONITOR_ENABLED) Serial.println(WiFi.localIP());
+
+    // Step 2: Point the soft-AP DHCP server at the upstream DNS so that
+    //         devices connected to the extender get real name resolution.
+    auto& dhcp = WiFi.softAPDhcpServer();
+    dhcp.setDns(WiFi.dnsIP(0));
+
+    // Step 3: Bring up the soft-AP (WIFI_AP_STA mode is set implicitly).
+    WiFi.softAPConfig(
+        IPAddress(Config::RANGE_EXT_AP_IP[0],     Config::RANGE_EXT_AP_IP[1],
+                  Config::RANGE_EXT_AP_IP[2],     Config::RANGE_EXT_AP_IP[3]),
+        IPAddress(Config::RANGE_EXT_AP_IP[0],     Config::RANGE_EXT_AP_IP[1],
+                  Config::RANGE_EXT_AP_IP[2],     Config::RANGE_EXT_AP_IP[3]),
+        IPAddress(Config::RANGE_EXT_AP_SUBNET[0], Config::RANGE_EXT_AP_SUBNET[1],
+                  Config::RANGE_EXT_AP_SUBNET[2], Config::RANGE_EXT_AP_SUBNET[3])
+    );
+    WiFi.softAP(apSsid, apPsk);
+
+    Utils::printSerial(F("[RangeExt] Soft-AP started. AP IP: "), "");
+    if (Config::SERIAL_MONITOR_ENABLED) Serial.println(WiFi.softAPIP());
+
+    // Step 4: Initialise NAPT and enable it on the soft-AP interface.
+    Utils::printSerial(F("[RangeExt] Initialising NAPT..."));
+    err_t ret = ip_napt_init(Config::NAPT_TABLE_SIZE, Config::NAPT_PORT_TABLE_SIZE);
+    if (ret == ERR_OK) {
+        ret = ip_napt_enable_no(SOFTAP_IF, 1);
+    }
+
+    if (ret == ERR_OK) {
+        Utils::printSerial(F("[RangeExt] NAPT enabled. Network '"), "");
+        Utils::printSerial(apSsid, "' is now NATed behind '");
+        Utils::printSerial(staSsid, "'.");
+        Serial.println();
+    } else {
+        Utils::printSerial(F("[RangeExt] NAPT initialisation failed — repeater will not forward traffic."));
+    }
+
+    Utils::setLED(HIGH);
+
+#elif defined(ARDUINO_ARCH_ESP32)
+    // ----- ESP32 approach: WiFi.AP.enableNAPT via event callback -----
+
+    // Register for WiFi events before starting anything.
+    WiFi.onEvent(onRangeExtenderEvent);
+
+    // Configure and start the soft-AP side.
+    WiFi.AP.begin();
+    WiFi.AP.config(
+        IPAddress(Config::RANGE_EXT32_AP_IP[0],    Config::RANGE_EXT32_AP_IP[1],
+                  Config::RANGE_EXT32_AP_IP[2],    Config::RANGE_EXT32_AP_IP[3]),
+        IPAddress(Config::RANGE_EXT32_AP_IP[0],    Config::RANGE_EXT32_AP_IP[1],
+                  Config::RANGE_EXT32_AP_IP[2],    Config::RANGE_EXT32_AP_IP[3]),
+        IPAddress(255, 255, 255, 0),
+        IPAddress(Config::RANGE_EXT32_AP_LEASE[0], Config::RANGE_EXT32_AP_LEASE[1],
+                  Config::RANGE_EXT32_AP_LEASE[2], Config::RANGE_EXT32_AP_LEASE[3]),
+        IPAddress(Config::RANGE_EXT32_AP_DNS[0],   Config::RANGE_EXT32_AP_DNS[1],
+                  Config::RANGE_EXT32_AP_DNS[2],   Config::RANGE_EXT32_AP_DNS[3])
+    );
+    WiFi.AP.create(apSsid, apPsk);
+
+    if (!WiFi.AP.waitStatusBits(ESP_NETIF_STARTED_BIT, 1000)) {
+        Utils::printSerial(F("[RangeExt] Soft-AP failed to start!"));
+    } else {
+        Utils::printSerial(F("[RangeExt] Soft-AP started. AP IP: "), "");
+        if (Config::SERIAL_MONITOR_ENABLED) Serial.println(WiFi.softAPIP());
+    }
+
+    // Connect STA — NAPT will be enabled in the event handler once IP is obtained.
+    Utils::printSerial(F("[RangeExt] Connecting STA to \""), "");
+    Utils::printSerial(staSsid, "\"...");
+    Serial.println();
+    WiFi.begin(staSsid, staPsk);
+
+    // Wait for connection with a visible indicator.
+    bool staConnected = false;
+    for (int i = 0; i < Config::WIRELESS_TIMEOUT_SEC * 2; i++) {
+        Utils::setLED(LOW);
+        if (WiFi.status() == WL_CONNECTED) {
+            staConnected = true;
+            break;
+        }
+        Utils::printSerial(F("."), "");
+        delay(50);
+        Utils::setLED(HIGH);
+        delay(450);
+    }
+    Serial.println();
+
+    if (staConnected) {
+        Utils::printSerial(F("[RangeExt] STA connected. IP: "), "");
+        if (Config::SERIAL_MONITOR_ENABLED) Serial.println(WiFi.localIP());
+    } else {
+        Utils::printSerial(F("[RangeExt] STA connection timed out — AP is up but internet will not be forwarded."));
+    }
+
+    Utils::setLED(HIGH);
+
+#else
+    // Platform does not support NAPT — fall back to a plain AP
+    Utils::printSerial(F("[RangeExt] NAPT not supported on this build. Starting plain AP."));
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(apSsid, apPsk, 1, 0, 5);
+    Utils::ledPulse(1000, 2000, 3);
+#endif
 }
 
 bool WirelessNetworkManager::initMDNS(const String& deviceID) {
@@ -116,28 +295,14 @@ bool WirelessNetworkManager::initMDNS(const String& deviceID) {
     return true;
 }
 
-bool WirelessNetworkManager::updateWirelessConfig(const char* mode, const char* ssid, const char* password) {
-    if (!mode || !ssid || !password) {
-        return false;
-    }
-    
-    // Update appropriate fields based on mode
-    if (strcmp(mode, "WIFI") == 0) {
-        wirelessConfig.mode = F("WIFI");
-        wirelessConfig.stationSSID = ssid;
-        wirelessConfig.stationPSK = password;
-    } else {
-        wirelessConfig.mode = F("AP");
-        wirelessConfig.apSSID = ssid;
-        wirelessConfig.apPSK = password;
-    }
-    
-    // Save to storage
+bool WirelessNetworkManager::updateWirelessConfig(const WirelessConfig& config) {
+    wirelessConfig = config;
+
     if (!StorageManager::saveWirelessConfig(wirelessConfig)) {
         Utils::printSerial(F("Failed to save wireless configuration."));
         return false;
     }
-    
+
     wirelessUpdatePending = true;
     Utils::printSerial(F("Wireless configuration updated successfully."));
     return true;
@@ -175,8 +340,16 @@ const String& WirelessNetworkManager::getMacAddress() {
 }
 
 String WirelessNetworkManager::getIPAddress() {
-    if (WiFi.getMode() == WIFI_STA) {
+    WiFiMode_t wifiMode = WiFi.getMode();
+    if (wifiMode == WIFI_STA) {
         return WiFi.localIP().toString();
+    } else if (wifiMode == WIFI_AP_STA) {
+        // Range extender: report both IPs
+        String ips = WiFi.localIP().toString();
+        ips += F(" (STA) / ");
+        ips += WiFi.softAPIP().toString();
+        ips += F(" (AP)");
+        return ips;
     } else {
         return WiFi.softAPIP().toString();
     }

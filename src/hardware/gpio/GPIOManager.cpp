@@ -1,5 +1,5 @@
 #include "GPIOManager.h"
-#include "../utils/Utils.h"
+#include "../../utils/Utils.h"
 
 void GPIOManager::begin() {
     Utils::printSerial(F("## Apply GPIO settings."));

@@ -279,33 +279,27 @@ void ESPCommandHandler::handleSetWireless(WebServerType& server) {
         return;
     }
     
-    const char* wirelessMode = doc["mode"] | "AP";
-    const char* newSSID = doc["ssid"] | "";
-    const char* newPass = doc["password"] | "";
-    
     WirelessConfig currentConfig = WirelessNetworkManager::getWirelessConfig();
+
+    const char* wirelessMode = doc["wireless_mode"] | currentConfig.mode.c_str();
+    const char* newSSID = doc["wifi_ssid"] | currentConfig.stationSSID.c_str();
+    const char* newPass = doc["wifi_password"] | currentConfig.stationPSK.c_str();
+    const char* apSsid = doc["ap_ssid"] | currentConfig.apSSID.c_str();
+    const char* apPass = doc["ap_password"] | currentConfig.apPSK.c_str();
+
+    WirelessConfig newConfig = currentConfig; // Start with current config as base
     
-    // Use current values if not provided
-    if (strcmp(wirelessMode, "WIFI") == 0) {
-        if (strlen(newSSID) == 0) {
-            newSSID = currentConfig.stationSSID.c_str();
-        }
-        if (strlen(newPass) == 0) {
-            newPass = currentConfig.stationPSK.c_str();
-        }
-    } else {
-        if (strlen(newSSID) == 0) {
-            newSSID = currentConfig.apSSID.c_str();
-        }
-        if (strlen(newPass) == 0) {
-            newPass = currentConfig.apPSK.c_str();
-        }
-    }
+    newConfig.mode = wirelessMode;
+    newConfig.stationSSID = newSSID;
+    newConfig.stationPSK = newPass;
+    newConfig.apSSID = apSsid;
+    newConfig.apPSK = apPass;
     
-    if (WirelessNetworkManager::updateWirelessConfig(wirelessMode, newSSID, newPass)) {
+    if (WirelessNetworkManager::updateWirelessConfig(newConfig)) {
         JsonDocument responseDoc;
         responseDoc["response"] = ResponseMsg::SUCCESS;
         responseDoc["message"]  = "Wireless config updated";
+        responseDoc["wireless_mode"] = newConfig.mode == "AP_STA" ? "Range Extender" : (newConfig.mode == "WIFI" ? "WiFi" : "Access Point");
         sendJsonResponse(server, 200, responseDoc);
     } else {
         sendError(server, 500, ResponseMsg::FAILURE);
