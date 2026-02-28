@@ -27,11 +27,11 @@ void WirelessNetworkManager::initWireless() {
         Utils::printSerial(F("Using default wireless configuration."));
     }
     
-    const char* mode = wirelessConfig.mode.c_str();
-    const char* wifiName = wirelessConfig.stationSSID.c_str();
-    const char* wifiPassword = wirelessConfig.stationPSK.c_str();
-    const char* apName = wirelessConfig.apSSID.c_str();
-    const char* apPassword = wirelessConfig.apPSK.c_str();
+    const char* mode = wirelessConfig.mode;
+    const char* wifiName = wirelessConfig.stationSSID;
+    const char* wifiPassword = wirelessConfig.stationPSK;
+    const char* apName = wirelessConfig.apSSID;
+    const char* apPassword = wirelessConfig.apPSK;
     
     Utils::printSerial(F("Wireless mode:"), F(""));
     Utils::printSerial(mode);
@@ -117,10 +117,10 @@ void WirelessNetworkManager::onRangeExtenderEvent(arduino_event_id_t event, ardu
 void WirelessNetworkManager::initRangeExtender() {
     Utils::printSerial(F("## Initializing Range Extender (STA + NATed AP)."));
 
-    const char* staSsid = wirelessConfig.stationSSID.c_str();
-    const char* staPsk  = wirelessConfig.stationPSK.c_str();
-    const char* apSsid  = wirelessConfig.apSSID.c_str();
-    const char* apPsk   = wirelessConfig.apPSK.c_str();
+    const char* staSsid = wirelessConfig.stationSSID;
+    const char* staPsk  = wirelessConfig.stationPSK;
+    const char* apSsid  = wirelessConfig.apSSID;
+    const char* apPsk   = wirelessConfig.apPSK;
 
 #if defined(ARDUINO_ARCH_ESP8266) && defined(RANGE_EXTENDER_NAPT_SUPPORTED)
     // ----- ESP8266 approach: lwIP NAPT -----
@@ -308,23 +308,23 @@ bool WirelessNetworkManager::updateWirelessConfig(const WirelessConfig& config) 
     return true;
 }
 
-WirelessConfig WirelessNetworkManager::getWirelessConfig() {
+const WirelessConfig& WirelessNetworkManager::getWirelessConfig() {
     return wirelessConfig;
 }
 
 String WirelessNetworkManager::getWirelessConfigJson() {
-    JsonDocument doc;
-    
-    doc["wireless_mode"] = wirelessConfig.mode;
-    doc["station_ssid"] = wirelessConfig.stationSSID;
-    doc["station_psk"] = wirelessConfig.stationPSK;
-    doc["ap_ssid"] = wirelessConfig.apSSID;
-    doc["ap_psk"] = wirelessConfig.apPSK;
-    
-    String result;
-    result.reserve(256); // Pre-allocate estimated size
-    serializeJson(doc, result);
-    return result;
+    // Build JSON directly — no heap-heavy JsonDocument needed for 5 scalar fields
+    char buf[320];
+    snprintf(buf, sizeof(buf),
+        "{\"wireless_mode\":\"%s\",\"station_ssid\":\"%s\","
+        "\"station_psk\":\"%s\",\"ap_ssid\":\"%s\",\"ap_psk\":\"%s\"}",
+        wirelessConfig.mode,
+        wirelessConfig.stationSSID,
+        wirelessConfig.stationPSK,
+        wirelessConfig.apSSID,
+        wirelessConfig.apPSK
+    );
+    return String(buf);
 }
 
 bool WirelessNetworkManager::isWirelessUpdatePending() {

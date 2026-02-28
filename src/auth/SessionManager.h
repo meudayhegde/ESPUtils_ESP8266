@@ -4,106 +4,135 @@
 #include <Arduino.h>
 #include "../config/Config.h"
 
-// Session structure
-struct AuthSession {
-    String token;
-    unsigned long expiryTime; // Unix timestamp
-    bool isValid;
-    
-    AuthSession() : token(""), expiryTime(0), isValid(false) {}
+// ── One in-RAM session slot ──────────────────────────────────────────────────
+// Fixed-size char arrays avoid heap fragmentation on ESP8266.
+struct SessionEntry {
+    char          sub[64];            // subject identifier (JWT "sub" or "family")
+    char          token[41];          // 40 hex-char opaque session token + NUL
+    unsigned long createdAtMillis;    // millis() at creation — used for 1-week expiry
+    bool          valid;
+
+    SessionEntry() : createdAtMillis(0), valid(false) {
+        sub[0]   = '\0';
+        token[0] = '\0';
+    }
 };
 
+// ── SessionManager ────────────────────────────────────────────────────────────
+//
+// Policy summary:
+//   • Up to MAX_SESSIONS (5) active sessions kept purely in RAM — cleared on reboot.
+//   • Each slot is keyed by "sub"; re-login for the same sub replaces that slot.
+//   • Session tokens expire after SESSION_EXPIRY_MS (1 week) or on reboot.
+//   • The "bound JWT" (first successful login) is persisted to flash so the
+//     embedded sub can be re-verified on every boot (signature check only).
+//
 class SessionManager {
 public:
-    /**
-     * @brief Initialize session manager and load from storage
-     */
-    static void begin();
-    
-    /**
-     * @brief Verify JWT token (ES256) and create session
-     * @param jwtToken JWT token string from cloud server
-     * @return Session token if valid, empty string otherwise
-     */
-    static String authenticateWithJWT(const String& jwtToken);
-    
-    /**
-     * @brief Validate session token
-     * @param sessionToken Session token to validate
-     * @return true if valid and not expired, false otherwise
-     */
-    static bool validateSession(const String& sessionToken);
-    
-    /**
-     * @brief Invalidate current session
-     */
-    static void invalidateSession();
-    
-    /**
-     * @brief Get current session info
-     * @return Current session structure
-     */
-    static AuthSession getCurrentSession();
-    
-    /**
-     * @brief Get current challenge string
-     * @return Current challenge string (auto-refreshes every 5 minutes)
-     */
-    static String getCurrentChallenge();
-    
-    /**
-     * @brief Check if challenge needs refresh and update if needed
-     * Called periodically to maintain fresh challenge
-     */
-    static void updateChallenge();
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
-     * @brief Run deferred tasks (call from loop())
-     * Saves session to flash if a write is pending.
+     * @brief Initialise challenge and clear all in-RAM session slots.
+     *        Does NOT touch flash — AuthManager::begin() handles bound-token load.
+     */
+    static void begin();
+
+    /**
+     * @brief Run deferred tasks from loop() — writes bound token to flash when
+     *        a bind is pending (avoids LittleFS stack overflow in HTTP handler).
      */
     static void tick();
 
-    static String createSession();
-    
+    // ── Session creation / validation ─────────────────────────────────────────
+
+    /**
+     * @brief Create (or replace) an in-RAM session for @p sub.
+     *        If a valid slot for this sub already exists it is overwritten.
+     *        When all 5 slots are occupied the oldest is evicted.
+     * @return The new opaque session token.
+     */
+    static String createSession(const char* sub);
+
+    /**
+     * @brief Validate an opaque session token against all active slots.
+     * @return true if a matching, non-expired slot exists.
+     */
+    static bool validateSession(const String& sessionToken);
+
+    /**
+     * @brief Invalidate all active in-RAM sessions (logout-all / factory reset).
+     */
+    static void invalidateAllSessions();
+
+    /**
+     * @brief Compatibility shim — calls invalidateAllSessions().
+     */
+    static void invalidateSession() { invalidateAllSessions(); }
+
+    // ── Bound identity (persisted to flash) ──────────────────────────────────
+
+    /**
+     * @brief Schedule a flush of @p rawJWT + @p sub to flash (deferred to tick()).
+     *        Also immediately caches the sub in s_boundSub.
+     */
+    static void bindJWT(const char* rawJWT, const char* sub);
+
+    /** @return true if a bound sub has been loaded / set. */
+    static bool hasBoundSub();
+
+    /** @return The cached bound sub string (empty string if none). */
+    static const char* getBoundSub();
+
+    /**
+     * @brief Directly set the bound sub (called by AuthManager after boot-time
+     *        signature verification of the persisted JWT).
+     */
+    static void setBoundSub(const char* sub);
+
+    // ── Challenge management ──────────────────────────────────────────────────
+
+    /** @return Current challenge string, refreshing stale one automatically. */
+    static String getCurrentChallenge();
+
+    /** @brief Refresh challenge if the refresh interval has elapsed. */
+    static void updateChallenge();
+
 private:
-    static void   initPublicKey();
-    static bool   verifyAndParseJWT(const char* jwt, size_t len);
-    
-    /**
-     * @brief Generate a random session token
-     * @return Random session token string
-     */
-    static String generateSessionToken();
-    
-    /**
-     * @brief Generate a random challenge string
-     * @return Random 8-character challenge string
-     */
+    static SessionEntry  s_sessions[Config::MAX_SESSIONS];
+
+    // Bound identity (populated from flash at boot by AuthManager)
+    static char s_boundSub[64];
+    static bool s_hasBoundSub;
+
+    // Challenge
+    static String        s_challengeString;
+    static unsigned long s_challengeGeneratedTime;
+    static const unsigned long CHALLENGE_REFRESH_INTERVAL = 300000UL; // 5 min
+
+    // Deferred flash write for bound JWT
+    static bool   s_pendingBind;
+    static String s_pendingBindJWT;
+    static String s_pendingBindSub;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /** Fill @p buf (41 bytes) with a new 40-character hex session token. */
+    static void generateSessionToken(char* buf, size_t bufLen);
+
+    /** Generate a fresh 8-character alphanumeric challenge. */
     static String generateChallengeString();
-    
+
+    /** Index of slot whose sub matches @p sub, or -1. */
+    static int findSlotBySub(const char* sub);
+
     /**
-     * @brief Save session to flash storage
-     * @return true if successful, false otherwise
+     * @brief Index of a free (invalid or expired) slot.
+     *        If all slots are occupied returns the index of the oldest one.
      */
-    static bool saveSession();
-    
-    /**
-     * @brief Load session from flash storage
-     * @return true if successful, false otherwise
-     */
-    static bool loadSession();
-    
-    /**
-     * @brief Check if session has expired
-     * @return true if expired, false otherwise
-     */
-    static bool isSessionExpired();
-    
-    static AuthSession currentSession;
-    static String challengeString;
-    static unsigned long challengeGeneratedTime;
-    static const unsigned long CHALLENGE_REFRESH_INTERVAL = 300000; // 5 minutes in milliseconds
-    static bool pendingSave;  // deferred flash write flag
+    static int findFreeOrOldestSlot();
+
+    /** @return true if the slot has lived longer than SESSION_EXPIRY_MS. */
+    static bool isSlotExpired(const SessionEntry& e);
 };
 
 #endif // SESSION_MANAGER_H

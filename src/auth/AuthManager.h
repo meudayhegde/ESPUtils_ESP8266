@@ -35,7 +35,28 @@ public:
 
 private:
     static void initPublicKey();
-    static bool verifyAndParseJWT(const char* jwt, size_t len);
+
+    /**
+     * @brief Parse and cryptographically verify a JWT (ES256).
+     *
+     * Populates the static s_parsedSub and s_parsedFamily buffers on success.
+     *
+     * @param jwt             Raw JWT string (header.payload.sig)
+     * @param len             Length of @p jwt
+     * @param verifyChallenge When true the "challenge" claim is checked against
+     *                        the current device challenge (required at login).
+     *                        When false only the signature is checked (used at
+     *                        boot to re-verify the persisted bound JWT).
+     * @return true on success, false on any failure.
+     */
+    static bool verifyAndParseJWT(const char* jwt, size_t len, bool verifyChallenge);
+
+    /**
+     * @brief Load the persisted bound JWT from flash and verify its signature.
+     *        On success calls SessionManager::setBoundSub() with the stored sub.
+     *        Called once from begin() after the public key is initialised.
+     */
+    static void loadAndVerifyBoundToken();
 };
 
 #endif // AUTH_MANAGER_H

@@ -281,25 +281,25 @@ void ESPCommandHandler::handleSetWireless(WebServerType& server) {
     
     WirelessConfig currentConfig = WirelessNetworkManager::getWirelessConfig();
 
-    const char* wirelessMode = doc["wireless_mode"] | currentConfig.mode.c_str();
-    const char* newSSID = doc["wifi_ssid"] | currentConfig.stationSSID.c_str();
-    const char* newPass = doc["wifi_password"] | currentConfig.stationPSK.c_str();
-    const char* apSsid = doc["ap_ssid"] | currentConfig.apSSID.c_str();
-    const char* apPass = doc["ap_password"] | currentConfig.apPSK.c_str();
+    const char* wirelessMode = doc["wireless_mode"] | currentConfig.mode;
+    const char* newSSID = doc["wifi_ssid"] | currentConfig.stationSSID;
+    const char* newPass = doc["wifi_password"] | currentConfig.stationPSK;
+    const char* apSsid = doc["ap_ssid"] | currentConfig.apSSID;
+    const char* apPass = doc["ap_password"] | currentConfig.apPSK;
 
     WirelessConfig newConfig = currentConfig; // Start with current config as base
     
-    newConfig.mode = wirelessMode;
-    newConfig.stationSSID = newSSID;
-    newConfig.stationPSK = newPass;
-    newConfig.apSSID = apSsid;
-    newConfig.apPSK = apPass;
+    strncpy(newConfig.mode,        wirelessMode, sizeof(newConfig.mode)        - 1); newConfig.mode[sizeof(newConfig.mode)               - 1] = '\0';
+    strncpy(newConfig.stationSSID, newSSID,      sizeof(newConfig.stationSSID) - 1); newConfig.stationSSID[sizeof(newConfig.stationSSID) - 1] = '\0';
+    strncpy(newConfig.stationPSK,  newPass,      sizeof(newConfig.stationPSK)  - 1); newConfig.stationPSK[sizeof(newConfig.stationPSK)   - 1] = '\0';
+    strncpy(newConfig.apSSID,      apSsid,       sizeof(newConfig.apSSID)      - 1); newConfig.apSSID[sizeof(newConfig.apSSID)           - 1] = '\0';
+    strncpy(newConfig.apPSK,       apPass,       sizeof(newConfig.apPSK)       - 1); newConfig.apPSK[sizeof(newConfig.apPSK)             - 1] = '\0';
     
     if (WirelessNetworkManager::updateWirelessConfig(newConfig)) {
         JsonDocument responseDoc;
         responseDoc["response"] = ResponseMsg::SUCCESS;
         responseDoc["message"]  = "Wireless config updated";
-        responseDoc["wireless_mode"] = newConfig.mode == "AP_STA" ? "Range Extender" : (newConfig.mode == "WIFI" ? "WiFi" : "Access Point");
+        responseDoc["wireless_mode"] = (strcmp(newConfig.mode, "AP_STA") == 0) ? "Range Extender" : (strcmp(newConfig.mode, "WIFI") == 0 ? "WiFi" : "Access Point");
         sendJsonResponse(server, 200, responseDoc);
     } else {
         sendError(server, 500, ResponseMsg::FAILURE);

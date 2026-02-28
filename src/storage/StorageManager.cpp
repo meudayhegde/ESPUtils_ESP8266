@@ -121,30 +121,100 @@ bool StorageManager::format() {
 }
 
 bool StorageManager::loadWirelessConfig(WirelessConfig& config) {
-    JsonDocument doc;
-    
-    if (!readJson(Config::WIFI_CONFIG_FILE, doc)) {
-        // Use defaults
+    File file = LittleFS.open(Config::WIFI_CONFIG_FILE, "r");
+    if (!file) {
+        Utils::printSerial(F("No wireless config file — using defaults."));
         return false;
     }
-    
-    config.mode = doc["mode"] | Config::DEFAULT_MODE;
-    config.stationSSID = doc["wifi_name"] | Config::DEVICE_NAME;
-    config.stationPSK = doc["wifi_pass"] | Config::DEVICE_PASSWORD;
-    config.apSSID = doc["ap_name"] | Config::DEVICE_NAME;
-    config.apPSK = doc["ap_pass"] | Config::DEVICE_PASSWORD;
-    
-    return true;
+
+    if (file.size() != sizeof(WirelessConfig)) {
+        Utils::printSerial(F("Wireless config size mismatch — using defaults."));
+        file.close();
+        return false;
+    }
+
+    bool ok = (file.read(reinterpret_cast<uint8_t*>(&config), sizeof(WirelessConfig)) == sizeof(WirelessConfig));
+    file.close();
+
+    // Ensure null-termination in case of corrupt data
+    config.mode[sizeof(config.mode) - 1]               = '\0';
+    config.stationSSID[sizeof(config.stationSSID) - 1] = '\0';
+    config.stationPSK[sizeof(config.stationPSK) - 1]   = '\0';
+    config.apSSID[sizeof(config.apSSID) - 1]           = '\0';
+    config.apPSK[sizeof(config.apPSK) - 1]             = '\0';
+
+    if (ok) {
+        Utils::printSerial(F("Wireless config loaded."));
+    } else {
+        Utils::printSerial(F("Wireless config read failed — using defaults."));
+    }
+    return ok;
 }
 
 bool StorageManager::saveWirelessConfig(const WirelessConfig& config) {
-    JsonDocument doc;
-    
-    doc["mode"] = config.mode;
-    doc["wifi_name"] = config.stationSSID;
-    doc["wifi_pass"] = config.stationPSK;
-    doc["ap_name"] = config.apSSID;
-    doc["ap_pass"] = config.apPSK;
-    
-    return writeJson(Config::WIFI_CONFIG_FILE, doc);
+    deleteFile(Config::WIFI_CONFIG_FILE);
+
+    File file = LittleFS.open(Config::WIFI_CONFIG_FILE, "w");
+    if (!file) {
+        Utils::printSerial(F("Failed to open wireless config for write."));
+        return false;
+    }
+
+    bool ok = (file.write(reinterpret_cast<const uint8_t*>(&config), sizeof(WirelessConfig)) == sizeof(WirelessConfig));
+    file.close();
+
+    if (ok) {
+        Utils::printSerial(F("Wireless config saved."));
+    } else {
+        Utils::printSerial(F("Wireless config write failed."));
+    }
+    return ok;
+}
+
+bool StorageManager::loadBoundToken(BoundTokenData& data) {
+    File file = LittleFS.open(Config::BOUND_TOKEN_FILE, "r");
+    if (!file) {
+        Utils::printSerial(F("\nNo bound token file found."));
+        return false;
+    }
+
+    if (file.size() != sizeof(BoundTokenData)) {
+        Utils::printSerial(F("\nBound token size mismatch — ignoring."));
+        file.close();
+        return false;
+    }
+
+    bool ok = (file.read(reinterpret_cast<uint8_t*>(&data), sizeof(BoundTokenData)) == sizeof(BoundTokenData));
+    file.close();
+
+    // Ensure null-termination in case of corrupt data
+    data.sub[sizeof(data.sub) - 1] = '\0';
+    data.jwt[sizeof(data.jwt) - 1] = '\0';
+
+    if (ok) {
+        Utils::printSerial(F("\nBound token loaded."));
+    } else {
+        Utils::printSerial(F("\nBound token read failed."));
+    }
+    return ok;
+}
+
+bool StorageManager::saveBoundToken(const BoundTokenData& data) {
+    deleteFile(Config::BOUND_TOKEN_FILE);
+
+    File file = LittleFS.open(Config::BOUND_TOKEN_FILE, "w");
+    if (!file) {
+        Utils::printSerial(F("\nFailed to open bound token for write."));
+        return false;
+    }
+
+    bool ok = (file.write(reinterpret_cast<const uint8_t*>(&data), sizeof(BoundTokenData)) == sizeof(BoundTokenData));
+    file.close();
+
+    if (ok) {
+        Utils::printSerial(F("\nBound token saved."));
+    } else {
+        Utils::printSerial(F("\nBound token write failed."));
+    }
+    return ok;
 }

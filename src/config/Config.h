@@ -39,7 +39,9 @@ namespace Config {
     constexpr uint8_t IR_TIMEOUT_MS = 50;
     
     // Session Configuration
-    constexpr unsigned long SESSION_EXPIRY_SECONDS = 604800; // 1 week in seconds
+    constexpr unsigned long SESSION_EXPIRY_SECONDS = 604800;      // 1 week in seconds
+    constexpr unsigned long SESSION_EXPIRY_MS      = 604800000UL; // 1 week in ms (for millis() comparison)
+    constexpr uint8_t       MAX_SESSIONS           = 5;           // max concurrent session tokens
     
     // Serial Configuration
     constexpr uint32_t BAUD_RATE = 115200;
@@ -70,29 +72,43 @@ namespace Config {
     constexpr uint16_t MAX_REQUEST_LENGTH = 5120;
     
     // File Paths
-    const char WIFI_CONFIG_FILE[] = "/WiFiConfig.json";
+    const char WIFI_CONFIG_FILE[] = "/WiFiConfig.bin";
     const char LOGIN_CREDENTIAL_FILE[] = "/LoginCredential.json";
     const char GPIO_CONFIG_FILE[] = "/GPIOConfig.json";
     const char SESSION_FILE[] = "/Session.json";
+    const char BOUND_TOKEN_FILE[] = "/BoundToken.bin";  // persisted JWT used to verify identity on boot
 }
 
 // ================================
 // Data Structures
 // ================================
 
+// Bound identity stored to flash on first-login; read back on every boot.
+// jwt[] is sized for the longest ES256 JWT we expect to receive.
+struct BoundTokenData {
+    char sub[64];   // JWT "sub" claim
+    char jwt[512];  // raw JWT string (header.payload.sig)
+
+    BoundTokenData() {
+        sub[0] = '\0';
+        jwt[0] = '\0';
+    }
+};
+
 struct WirelessConfig {
-    String mode;
-    String stationSSID;
-    String stationPSK;
-    String apSSID;
-    String apPSK;
-    
-    WirelessConfig() : 
-        mode(Config::DEFAULT_MODE),
-        stationSSID(Config::DEVICE_NAME),
-        stationPSK(Config::DEVICE_PASSWORD),
-        apSSID(Config::DEVICE_NAME),
-        apPSK(Config::DEVICE_PASSWORD) {}
+    char mode[8];           // "AP", "WIFI", "AP_STA"
+    char stationSSID[33];   // WiFi SSID (max 32 chars)
+    char stationPSK[64];    // WiFi passphrase (max 63 chars)
+    char apSSID[33];        // SoftAP SSID
+    char apPSK[64];         // SoftAP passphrase
+
+    WirelessConfig() {
+        strncpy(mode,        Config::DEFAULT_MODE,     sizeof(mode)        - 1); mode[sizeof(mode)               - 1] = '\0';
+        strncpy(stationSSID, Config::DEVICE_NAME,      sizeof(stationSSID) - 1); stationSSID[sizeof(stationSSID) - 1] = '\0';
+        strncpy(stationPSK,  Config::DEVICE_PASSWORD,  sizeof(stationPSK)  - 1); stationPSK[sizeof(stationPSK)   - 1] = '\0';
+        strncpy(apSSID,      Config::DEVICE_NAME,      sizeof(apSSID)      - 1); apSSID[sizeof(apSSID)           - 1] = '\0';
+        strncpy(apPSK,       Config::DEVICE_PASSWORD,  sizeof(apPSK)       - 1); apPSK[sizeof(apPSK)             - 1] = '\0';
+    }
 };
 
 struct GPIOConfig {

@@ -1,5 +1,6 @@
 #include "AuthManager.h"
 #include "../utils/Utils.h"
+#include "../storage/StorageManager.h"
 #include <ArduinoJson.h>
 
 // Cryptographic includes
@@ -150,6 +151,10 @@ static bool               s_pubKeyReady = false;
 static mbedtls_pk_context s_pkCtx;
 #endif
 
+// ── Parsed JWT claims (populated by verifyAndParseJWT, cleared each call) ──
+static char s_parsedSub[64]    = {};
+static char s_parsedFamily[64] = {};
+
 void AuthManager::begin() {
     Utils::printSerial(F("## Load Auth module..."));
 
@@ -161,19 +166,54 @@ void AuthManager::begin() {
     // Parse and cache the EC public key once at boot
     initPublicKey();
 
-    // Initialize session manager
+    // Initialize session manager (challenge + clear RAM sessions)
     SessionManager::begin();
+
+    // Load and re-verify the bound JWT from flash (signature only, no challenge)
+    loadAndVerifyBoundToken();
 }
 
 String AuthManager::authenticateWithJWT(const char* jwt, size_t jwtLen) {
     Utils::printSerial(F("Authenticating with JWT..."));
 
-    // if (!verifyAndParseJWT(jwt, jwtLen)) {
-    //     Utils::printSerial(F("JWT authentication failed."));
-    //     return "";
-    // }
+    // Verify signature + challenge for every login attempt
+    if (!verifyAndParseJWT(jwt, jwtLen, true)) {
+        Utils::printSerial(F("JWT authentication failed."));
+        return "";
+    }
 
-    return SessionManager::createSession();
+    const char* incomingSub    = s_parsedSub;     // may be empty string
+    const char* incomingFamily = s_parsedFamily;  // may be empty string
+
+    if (!SessionManager::hasBoundSub()) {
+        // ── First-time login ─────────────────────────────────────────────────
+        // The token MUST carry a "sub" claim so we can bind this device to an identity.
+
+        // Persist the raw JWT + sub to flash (deferred write via tick())
+        SessionManager::bindJWT(jwt, incomingSub);
+        Utils::printSerial(F("Identity bound to sub: "), incomingSub);
+        return SessionManager::createSession(incomingSub);
+
+    } else {
+        // ── Subsequent login ─────────────────────────────────────────────────
+        // Accept if:  sub == bound_sub   OR   family == bound_sub
+        const char* bound     = SessionManager::getBoundSub();
+        bool subMatch         = (incomingSub[0]    != '\0') && (strcmp(incomingSub,    bound) == 0);
+        bool familyMatch      = (incomingFamily[0] != '\0') && (strcmp(incomingFamily, bound) == 0);
+
+        if (!subMatch && !familyMatch) {
+            Utils::printSerial(F("JWT: sub/family does not match bound identity"));
+            Utils::printSerial(F("  bound   : "), bound);
+            Utils::printSerial(F("  sub     : "), incomingSub);
+            Utils::printSerial(F("  family  : "), incomingFamily);
+            return "";
+        }
+
+        // Key the session slot by the token's own sub when present;
+        // fall back to the family value (which equals bound_sub) otherwise.
+        const char* sessionSub = (incomingSub[0] != '\0') ? incomingSub : incomingFamily;
+        return SessionManager::createSession(sessionSub);
+    }
 }
 
 bool AuthManager::validateSession(const String& sessionToken) {
@@ -184,19 +224,44 @@ void AuthManager::logout() {
     SessionManager::invalidateSession();
 }
 
+void AuthManager::loadAndVerifyBoundToken() {
+    Utils::printSerial(F("\nChecking for persisted bound JWT..."));
+
+    BoundTokenData data;
+    if (!StorageManager::loadBoundToken(data)) {
+        Utils::printSerial(F("\nNo bound JWT found — first-login not yet performed."));
+        return;
+    }
+
+    if (data.sub[0] == '\0' || data.jwt[0] == '\0') {
+        Utils::printSerial(F("\nBound token data empty — ignoring."));
+        return;
+    }
+
+    // Verify signature only (no challenge check — the challenge is not stored)
+    if (!verifyAndParseJWT(data.jwt, strlen(data.jwt), false)) {
+        Utils::printSerial(F("\nBound JWT signature invalid — ignoring persisted identity."));
+        return;
+    }
+
+    // Trust the sub that was written at bind time (already validated then)
+    SessionManager::setBoundSub(data.sub);
+    Utils::printSerial(F("\nBound identity restored — sub: "), data.sub);
+}
+
 void AuthManager::initPublicKey() {
 #ifdef ARDUINO_ARCH_ESP8266
     const char* pem      = Config::JWT_PUB_KEY;
     const char* b64Start = strstr(pem, "-----BEGIN PUBLIC KEY-----");
-    if (!b64Start) { Utils::printSerial(F("PEM: no begin marker")); return; }
+    if (!b64Start) { Utils::printSerial(F("\nPEM: no begin marker")); return; }
     b64Start += 26;
     const char* b64End = strstr(pem, "-----END PUBLIC KEY-----");
-    if (!b64End)  { Utils::printSerial(F("PEM: no end marker")); return; }
+    if (!b64End)  { Utils::printSerial(F("\nPEM: no end marker")); return; }
 
     uint8_t keyDer[128];
     size_t  keyLen = base64Decode(b64Start, b64End - b64Start, keyDer, sizeof(keyDer));
-    if (keyLen == 0) { Utils::printSerial(F("PEM: decode failed")); return; }
-    Utils::printSerial(F("PEM: DER length="), keyLen);
+    if (keyLen == 0) { Utils::printSerial(F("\nPEM: decode failed")); return; }
+    Utils::printSerial(F("\nPEM: DER length="), keyLen);
     Utils::printSerial(F(""));
 
     for (size_t i = 0; i + 64 < keyLen; i++) {
@@ -233,7 +298,7 @@ void AuthManager::initPublicKey() {
 #endif
 }
 
-bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen) {
+bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen, bool verifyChallenge) {
     // ── 1. Locate the two dots (once, no String allocations) ──
     const char* dot1 = (const char*)memchr(jwt, '.', jwtLen);
     if (!dot1) { Utils::printSerial(F("JWT: missing first dot")); return false; }
@@ -258,8 +323,13 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen) {
         return false;
     }
 
-    // ── 3. Decode payload, validate challenge (before SHA-256) ──
+    // ── 3. Decode payload, extract claims (challenge + sub + family) ──────────
+    //       Fast-fail challenge check happens before the expensive crypto.
     static uint8_t pay[256];
+    // Clear parsed-claim output buffers
+    s_parsedSub[0]    = '\0';
+    s_parsedFamily[0] = '\0';
+
     size_t payLen = b64urlDecodeLenient(dot1 + 1, d2 - d1 - 1, pay, sizeof(pay) - 1);
     if (payLen == 0 || payLen >= sizeof(pay) - 1) {
         Utils::printSerial(F("JWT: payload decode failed"));
@@ -274,17 +344,31 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen) {
             return false;
         }
 
-        // Challenge check — fast fail before expensive crypto
-        const char* challenge = payDoc["challenge"] | "";
-        
-        String currentChallenge = SessionManager::getCurrentChallenge();
-        Utils::printSerial(F("  token challenge : ["), challenge);
-        Utils::printSerial(F("]\n  device challenge: ["), currentChallenge);
-        Utils::printSerial(F("]"));
+        // Extract sub and family (may be absent)
+        const char* rawSub    = payDoc["sub"]    | "";
+        const char* rawFamily = payDoc["family"]  | "";
+        strncpy(s_parsedSub,    rawSub,    sizeof(s_parsedSub)    - 1);
+        strncpy(s_parsedFamily, rawFamily, sizeof(s_parsedFamily) - 1);
+        s_parsedSub[sizeof(s_parsedSub)       - 1] = '\0';
+        s_parsedFamily[sizeof(s_parsedFamily) - 1] = '\0';
 
-        if (challenge[0] == '\0' || currentChallenge != challenge) {
-            Utils::printSerial(F("JWT: invalid challenge"));
+        if (s_parsedSub[0] == '\0') {
+            Utils::printSerial(F("JWT: requires a 'sub' claim"));
             return false;
+        }
+
+        // Challenge check — fast fail before expensive ECDSA
+        if (verifyChallenge) {
+            const char* challenge = payDoc["challenge"] | "";
+            String currentChallenge = SessionManager::getCurrentChallenge();
+            Utils::printSerial(F("  token challenge : ["), challenge);
+            Utils::printSerial(F("]\n  device challenge: ["), currentChallenge);
+            Utils::printSerial(F("]"));
+
+            if (challenge[0] == '\0' || currentChallenge != challenge) {
+                Utils::printSerial(F("JWT: invalid challenge"));
+                return false;
+            }
         }
     }  // payDoc freed here — before crypto
 
@@ -317,7 +401,7 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen) {
     }
 
     // ── 6. ECDSA verify (most expensive — done last) ──
-    Utils::printSerial(F("DBG pubKeyReady=")), s_pubKeyReady ? F("true") : F("false");
+    Utils::printSerial(F("DBG pubKeyReady=")), s_pubKeyReady ? F("true\n") : F("false\n");
     if (!s_pubKeyReady) { Utils::printSerial(F("JWT: public key not loaded")); return false; }
 
 #ifdef ARDUINO_ARCH_ESP8266

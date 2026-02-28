@@ -1,186 +1,187 @@
 #include "SessionManager.h"
 #include "../storage/StorageManager.h"
 #include "../utils/Utils.h"
-#include <ArduinoJson.h>
 
-AuthSession SessionManager::currentSession;
-String SessionManager::challengeString = "";
-unsigned long SessionManager::challengeGeneratedTime = 0;
-bool SessionManager::pendingSave = false;
+// ── Static member definitions ─────────────────────────────────────────────────
+SessionEntry  SessionManager::s_sessions[Config::MAX_SESSIONS];
+char          SessionManager::s_boundSub[64]        = {};
+bool          SessionManager::s_hasBoundSub         = false;
+String        SessionManager::s_challengeString     = "";
+unsigned long SessionManager::s_challengeGeneratedTime = 0;
+bool          SessionManager::s_pendingBind         = false;
+String        SessionManager::s_pendingBindJWT      = "";
+String        SessionManager::s_pendingBindSub      = "";
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 void SessionManager::begin() {
     Utils::printSerial(F("## Initialize Session Manager."));
-    
-    // Generate initial challenge string
-    challengeString = generateChallengeString();
-    challengeGeneratedTime = millis();
-    Utils::printSerial(F("Initial challenge generated: "), challengeString.c_str());
-    
-    // Load existing session from flash
-    if (loadSession()) {
-        if (isSessionExpired()) {
-            Utils::printSerial(F("Stored session expired. Invalidating."));
-            invalidateSession();
-        } else {
-            Utils::printSerial(F("Valid session loaded from storage."));
-        }
-    } else {
-        Utils::printSerial(F("No stored session found."));
-    }
-}
 
-String SessionManager::createSession() {
-    String sessionToken       = generateSessionToken();
-    currentSession.token      = sessionToken;
-    currentSession.expiryTime = millis() / 1000 + Config::SESSION_EXPIRY_SECONDS;
-    currentSession.isValid    = true;
-    
-    // Defer flash write to loop() — LittleFS uses too much stack
-    // for the ESP8266 cont stack (4 KB) when called inside an HTTP handler.
-    pendingSave = true;
-    Utils::printSerial(F("Session created (save pending)."));
-    
-    return sessionToken;
+    // Reset all in-RAM session slots
+    for (uint8_t i = 0; i < Config::MAX_SESSIONS; i++) {
+        s_sessions[i] = SessionEntry();
+    }
+
+    // Generate initial challenge
+    s_challengeString         = generateChallengeString();
+    s_challengeGeneratedTime  = millis();
+    Utils::printSerial(F("Challenge: "), s_challengeString.c_str());
 }
 
 void SessionManager::tick() {
-    if (!pendingSave) return;
-    pendingSave = false;
-    if (!saveSession()) {
-        Utils::printSerial(F("Warning: session save failed."));
-    } else {
-        Utils::printSerial(F("Session persisted to flash."));
+    if (!s_pendingBind) return;
+    s_pendingBind = false;
+
+    // Write bound JWT + sub to flash as a fixed-size binary struct
+    BoundTokenData data;
+    strncpy(data.sub, s_pendingBindSub.c_str(), sizeof(data.sub) - 1);
+    data.sub[sizeof(data.sub) - 1] = '\0';
+    strncpy(data.jwt, s_pendingBindJWT.c_str(), sizeof(data.jwt) - 1);
+    data.jwt[sizeof(data.jwt) - 1] = '\0';
+
+    if (!StorageManager::saveBoundToken(data)) {
+        Utils::printSerial(F("\nWarning: bound token save failed."));
     }
+
+    s_pendingBindJWT = "";
+    s_pendingBindSub = "";
+}
+
+// ── Session creation / validation ─────────────────────────────────────────────
+
+String SessionManager::createSession(const char* sub) {
+    int idx = findSlotBySub(sub);
+    if (idx < 0) {
+        idx = findFreeOrOldestSlot();
+        Utils::printSerial(F("\nSession slot allocated: "), (long)idx);
+    } else {
+        Utils::printSerial(F("\nSession slot replaced for sub: "), sub);
+    }
+
+    SessionEntry& slot   = s_sessions[idx];
+    strncpy(slot.sub, sub, sizeof(slot.sub) - 1);
+    slot.sub[sizeof(slot.sub) - 1] = '\0';
+    generateSessionToken(slot.token, sizeof(slot.token));
+    slot.createdAtMillis = millis();
+    slot.valid           = true;
+
+    Utils::printSerial(F("\nSession created for sub: "), sub);
+    return String(slot.token);
 }
 
 bool SessionManager::validateSession(const String& sessionToken) {
-    // Check if session exists and is valid
-    if (!currentSession.isValid || currentSession.token.length() == 0) {
-        return false;
-    }
-    
-    // Check if token matches
-    if (currentSession.token != sessionToken) {
-        return false;
-    }
-    
-    // Check if session has expired
-    if (isSessionExpired()) {
-        invalidateSession();
-        return false;
-    }
-    
-    return true;
-}
-
-void SessionManager::invalidateSession() {
-    currentSession.token = "";
-    currentSession.expiryTime = 0;
-    currentSession.isValid = false;
-    
-    // Delete from flash storage
-    StorageManager::deleteFile(Config::SESSION_FILE);
-    
-    Utils::printSerial(F("Session invalidated."));
-}
-
-AuthSession SessionManager::getCurrentSession() {
-    return currentSession;
-}
-
-String SessionManager::generateSessionToken() {
-    // Single stack buffer — one String allocation, no intermediate heap copies
-    char token[41];  // 8 hex (timestamp) + 32 hex (16 random bytes) + '\0'
-    snprintf(token, 9, "%08lX", millis());
-    for (int i = 0; i < 16; i++) {
-        snprintf(token + 8 + i * 2, 3, "%02X", (uint8_t)random(256));
-    }
-    token[40] = '\0';
-    return String(token);
-}
-
-bool SessionManager::saveSession() {
-    JsonDocument doc;
-    
-    doc["token"] = currentSession.token;
-    doc["expiry"] = currentSession.expiryTime;
-    doc["valid"] = currentSession.isValid;
-
-    return StorageManager::writeJson(Config::SESSION_FILE, doc);
-}
-
-bool SessionManager::loadSession() {
-    JsonDocument doc;
-    
-    if (!StorageManager::readJson(Config::SESSION_FILE, doc)) {
-        return false;
-    }
-    
-    currentSession.token = doc["token"] | "";
-    currentSession.expiryTime = doc["expiry"] | 0UL;
-    currentSession.isValid = doc["valid"] | false;
-    
-    return currentSession.token.length() > 0;
-}
-
-bool SessionManager::isSessionExpired() {
-    if (!currentSession.isValid) {
-        return true;
-    }
-    
-    unsigned long currentTime = millis() / 1000;
-    
-    // Handle millis() rollover (occurs after ~49 days)
-    // If currentTime < expiryTime but the difference is huge, we've rolled over
-    if (currentTime < currentSession.expiryTime) {
-        unsigned long diff = currentSession.expiryTime - currentTime;
-        // If difference is still reasonable (less than session expiry time), not expired
-        if (diff <= Config::SESSION_EXPIRY_SECONDS) {
-            return false;
+    const char* tok = sessionToken.c_str();
+    for (uint8_t i = 0; i < Config::MAX_SESSIONS; i++) {
+        SessionEntry& slot = s_sessions[i];
+        if (!slot.valid) continue;
+        if (isSlotExpired(slot)) {
+            slot.valid = false;
+            continue;
         }
+        if (strcmp(slot.token, tok) == 0) return true;
     }
-    
-    // Current time >= expiry time, session expired
-    return currentTime >= currentSession.expiryTime;
+    return false;
 }
+
+void SessionManager::invalidateAllSessions() {
+    for (uint8_t i = 0; i < Config::MAX_SESSIONS; i++) {
+        s_sessions[i].valid = false;
+    }
+    Utils::printSerial(F("All sessions invalidated."));
+}
+
+// ── Bound identity ────────────────────────────────────────────────────────────
+
+void SessionManager::bindJWT(const char* rawJWT, const char* sub) {
+    // Cache sub immediately
+    setBoundSub(sub);
+
+    // Defer the flash write to loop() / tick()
+    s_pendingBindJWT = String(rawJWT);
+    s_pendingBindSub = String(sub);
+    s_pendingBind    = true;
+    Utils::printSerial(F("Bind JWT queued for flash write (sub: "), sub);
+    Utils::printSerial(F(")"));
+}
+
+bool SessionManager::hasBoundSub() {
+    return s_hasBoundSub;
+}
+
+const char* SessionManager::getBoundSub() {
+    return s_boundSub;
+}
+
+void SessionManager::setBoundSub(const char* sub) {
+    strncpy(s_boundSub, sub, sizeof(s_boundSub) - 1);
+    s_boundSub[sizeof(s_boundSub) - 1] = '\0';
+    s_hasBoundSub = (s_boundSub[0] != '\0');
+}
+
+// ── Challenge management ──────────────────────────────────────────────────────
 
 String SessionManager::getCurrentChallenge() {
-    // Check if challenge needs refresh
     updateChallenge();
-    return challengeString;
+    return s_challengeString;
 }
 
 void SessionManager::updateChallenge() {
-    unsigned long currentTime = millis();
-    
-    // Handle millis() rollover
-    bool needsRefresh = false;
-    if (currentTime >= challengeGeneratedTime) {
-        needsRefresh = (currentTime - challengeGeneratedTime) >= CHALLENGE_REFRESH_INTERVAL;
-    } else {
-        // Rollover occurred
-        needsRefresh = true;
-    }
-    
-    if (needsRefresh) {
-        challengeString = generateChallengeString();
-        challengeGeneratedTime = currentTime;
-        Utils::printSerial(F("Challenge refreshed: "), challengeString.c_str());
-        Utils::printSerial(F(""));
+    unsigned long now  = millis();
+    bool rollover      = (now < s_challengeGeneratedTime);
+    bool stale         = (!rollover) && ((now - s_challengeGeneratedTime) >= CHALLENGE_REFRESH_INTERVAL);
+
+    if (rollover || stale) {
+        s_challengeString        = generateChallengeString();
+        s_challengeGeneratedTime = now;
+        Utils::printSerial(F("\nChallenge refreshed: "), s_challengeString.c_str());
     }
 }
 
-String SessionManager::generateChallengeString() {
-    // Generate an 8-character random challenge string using alphanumeric characters
-    const char charset[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const int charsetLength = sizeof(charset) - 1;
-    const int challengeLength = 8;
-    
-    String challenge = "";
-    
-    for (int i = 0; i < challengeLength; i++) {
-        challenge += charset[random(charsetLength)];
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+void SessionManager::generateSessionToken(char* buf, size_t bufLen) {
+    if (bufLen < 41) return;
+    snprintf(buf, 9, "%08lX", millis());
+    for (int i = 0; i < 16; i++) {
+        snprintf(buf + 8 + i * 2, 3, "%02X", (uint8_t)random(256));
     }
-    
-    return challenge;
+    buf[40] = '\0';
+}
+
+String SessionManager::generateChallengeString() {
+    const char charset[]  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const int  charsetLen = sizeof(charset) - 1;
+    String     ch         = "";
+    for (int i = 0; i < 8; i++) ch += charset[random(charsetLen)];
+    return ch;
+}
+
+int SessionManager::findSlotBySub(const char* sub) {
+    for (uint8_t i = 0; i < Config::MAX_SESSIONS; i++) {
+        if (s_sessions[i].valid && strcmp(s_sessions[i].sub, sub) == 0) return (int)i;
+    }
+    return -1;
+}
+
+int SessionManager::findFreeOrOldestSlot() {
+    // Prefer an invalid or expired slot
+    for (uint8_t i = 0; i < Config::MAX_SESSIONS; i++) {
+        if (!s_sessions[i].valid || isSlotExpired(s_sessions[i])) return (int)i;
+    }
+    // All slots occupied — evict the oldest
+    int   oldest     = 0;
+    unsigned long min = s_sessions[0].createdAtMillis;
+    for (uint8_t i = 1; i < Config::MAX_SESSIONS; i++) {
+        if (s_sessions[i].createdAtMillis < min) {
+            min    = s_sessions[i].createdAtMillis;
+            oldest = (int)i;
+        }
+    }
+    Utils::printSerial(F("Session pool full — evicting oldest slot: "), (long)oldest);
+    return oldest;
+}
+
+bool SessionManager::isSlotExpired(const SessionEntry& e) {
+    // Unsigned subtraction handles millis() rollover correctly
+    return (millis() - e.createdAtMillis) >= Config::SESSION_EXPIRY_MS;
 }

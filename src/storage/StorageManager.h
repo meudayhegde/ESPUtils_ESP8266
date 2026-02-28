@@ -78,6 +78,20 @@ public:
      * @return true if successful, false otherwise
      */
     static bool saveWirelessConfig(const WirelessConfig& config);
+
+    /**
+     * @brief Load bound token data from binary file
+     * @param data BoundTokenData struct to populate
+     * @return true if successful, false otherwise
+     */
+    static bool loadBoundToken(BoundTokenData& data);
+
+    /**
+     * @brief Save bound token data to binary file
+     * @param data BoundTokenData struct to save
+     * @return true if successful, false otherwise
+     */
+    static bool saveBoundToken(const BoundTokenData& data);
 };
 
 #endif // STORAGE_MANAGER_H

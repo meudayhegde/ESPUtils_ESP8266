@@ -188,8 +188,8 @@ void loop() {
     // Handle HTTP requests
     httpServer.handleClient();
     
-    // Persist session to flash if needed (deferred from HTTP handler)
-    // SessionManager::tick();
+    // Persist bound JWT to flash if a first-login bind is pending (deferred from HTTP handler)
+    SessionManager::tick();
     
     // Update challenge string (auto-refreshes every 5 minutes)
     SessionManager::updateChallenge();

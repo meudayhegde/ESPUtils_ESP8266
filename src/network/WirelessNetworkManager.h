@@ -14,7 +14,6 @@
 #elif ARDUINO_ARCH_ESP32
     #include <WiFi.h>
 #endif
-#include <ArduinoJson.h>
 #include "../config/Config.h"
 #include "../storage/StorageManager.h"
 
@@ -63,9 +62,9 @@ public:
     
     /**
      * @brief Get current wireless configuration
-     * @return WirelessConfig structure
+     * @return const reference to the in-memory WirelessConfig
      */
-    static WirelessConfig getWirelessConfig();
+    static const WirelessConfig& getWirelessConfig();
     
     /**
      * @brief Get wireless configuration as JSON string
