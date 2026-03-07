@@ -13,6 +13,25 @@
 uint8_t       ESPCommandHandler::_rlCount       = 0;
 unsigned long ESPCommandHandler::_rlWindowStart = 0;
 
+// ── Sleep mode state ─────────────────────────────────────────────────────────
+#if FEATURE_SLEEP_ENABLED
+bool ESPCommandHandler::_sleepEnabled = false;
+
+void ESPCommandHandler::initSleep() {
+    bool loaded = false;
+    bool ok = StorageManager::loadSleepEnabled(loaded);
+    _sleepEnabled = ok ? loaded : false;
+
+#if defined(ARDUINO_ARCH_ESP32)
+    WiFi.setSleep(_sleepEnabled);
+#elif defined(ARDUINO_ARCH_ESP8266)
+    WiFi.setSleepMode(_sleepEnabled ? WIFI_MODEM_SLEEP : WIFI_NONE_SLEEP);
+#endif
+
+    Utils::printSerial(F("Sleep mode initialized: "), _sleepEnabled ? "enabled" : "disabled");
+}
+#endif
+
 void ESPCommandHandler::setupRoutes(WebServerType& server) {
     Utils::printSerial(F("\n## Setting up HTTP REST API routes."));
 
@@ -64,6 +83,12 @@ void ESPCommandHandler::setupRoutes(WebServerType& server) {
     server.on("/api/reset", HTTP_POST, [&server]() { 
         withLEDIndicator(server, handleReset); 
     }, rawBodyStub);
+
+#if FEATURE_SLEEP_ENABLED
+    server.on("/api/sleep", HTTP_PUT, [&server]() {
+        withLEDIndicator(server, handleSleep);
+    }, rawBodyStub);
+#endif
 
 #if defined(ESP_CAM_HW_EXIST)
     server.on("/api/camera/enable", HTTP_PUT, [&server]() {
@@ -181,7 +206,7 @@ void ESPCommandHandler::sendError(WebServerType& server, int code, const char* m
 // ================================
 
 void ESPCommandHandler::handlePing(WebServerType& server) {
-    Utils::printSerial(F("Handling /ping request"));
+    Utils::printSerial(F("\nHandling /ping request"));
 
     BinPingResponse resp;
     memset(&resp, 0, sizeof(resp));
@@ -201,7 +226,7 @@ void ESPCommandHandler::handlePing(WebServerType& server) {
 // ================================
 
 void ESPCommandHandler::handleAuth(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/auth request"));
+    Utils::printSerial(F("\nHandling /api/auth request"));
 
     BinAuthRequest req;
     if (readBinaryBody(server, &req, sizeof(req)) == 0) {
@@ -240,7 +265,7 @@ void ESPCommandHandler::handleAuth(WebServerType& server) {
 // ================================
 
 void ESPCommandHandler::handleDeviceInfo(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/device request"));
+    Utils::printSerial(F("\nHandling /api/device request"));
 
     if (!validateSessionToken(server)) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
@@ -265,6 +290,11 @@ void ESPCommandHandler::handleDeviceInfo(WebServerType& server) {
     copyToField(resp.platform_key,  PLATFORM_KEY,  sizeof(resp.platform_key));
     copyToField(resp.wirelessMode,  WirelessNetworkManager::getWirelessConfig().mode, sizeof(resp.wirelessMode));
     resp.isBound = SessionManager::hasBoundSub() ? 1 : 0;
+#if FEATURE_SLEEP_ENABLED
+    resp.sleepEnabled = _sleepEnabled ? 1 : 0;
+#else
+    resp.sleepEnabled = 0;
+#endif
 
     sendBinaryResponse(server, 200, &resp, sizeof(resp));
 }
@@ -290,7 +320,7 @@ void ESPCommandHandler::handleIRCapture(WebServerType& server) {
 }
 
 void ESPCommandHandler::handleIRSend(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/ir/send request"));
+    Utils::printSerial(F("\nHandling /api/ir/send request"));
 
     if (!validateSessionToken(server)) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
@@ -483,7 +513,7 @@ void ESPCommandHandler::handleWirelessScan(WebServerType& server) {
 }
 
 void ESPCommandHandler::handleGPIOSet(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/gpio/set request"));
+    Utils::printSerial(F("\nHandling /api/gpio/set request"));
 
     if (!validateSessionToken(server)) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
@@ -504,7 +534,7 @@ void ESPCommandHandler::handleGPIOSet(WebServerType& server) {
 }
 
 void ESPCommandHandler::handleGPIOGet(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/gpio/get request"));
+    Utils::printSerial(F("\nHandling /api/gpio/get request"));
 
     if (!validateSessionToken(server)) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
@@ -533,7 +563,7 @@ void ESPCommandHandler::handleGPIOGet(WebServerType& server) {
 }
 
 void ESPCommandHandler::handleRestart(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/restart request"));
+    Utils::printSerial(F("\nHandling /api/restart request"));
 
     if (!validateSessionToken(server)) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
@@ -548,8 +578,44 @@ void ESPCommandHandler::handleRestart(WebServerType& server) {
     ESP.restart();
 }
 
+#if FEATURE_SLEEP_ENABLED
+void ESPCommandHandler::handleSleep(WebServerType& server) {
+    Utils::printSerial(F("\nHandling /api/sleep request"));
+
+    if (!validateSessionToken(server)) {
+        sendBinaryError(server, 401, BIN_STATUS_ERROR, "Unauthorized");
+        return;
+    }
+
+    BinSleepRequest req;
+    if (readBinaryBody(server, &req, sizeof(req)) == 0) {
+        sendBinaryError(server, 400, BIN_STATUS_ERROR, "Sleep request data required");
+        return;
+    }
+
+    bool enable = (req.enabled != 0);
+
+#if defined(ARDUINO_ARCH_ESP32)
+    // ESP32: WiFi modem light sleep — saves ~20 mA between TX/RX windows
+    WiFi.setSleep(enable);
+#elif defined(ARDUINO_ARCH_ESP8266)
+    // ESP8266: modem sleep — WiFi modem powers down between beacon intervals
+    WiFi.setSleepMode(enable ? WIFI_MODEM_SLEEP : WIFI_NONE_SLEEP);
+#endif
+
+    _sleepEnabled = enable;
+    StorageManager::saveSleepEnabled(_sleepEnabled);
+    Utils::printSerial(F("Sleep mode: "), enable ? "enabled" : "disabled");
+
+    BinSleepResponse resp;
+    resp.status  = BIN_STATUS_OK;
+    resp.enabled = _sleepEnabled ? 1 : 0;
+    sendBinaryResponse(server, 200, &resp, sizeof(resp));
+}
+#endif
+
 void ESPCommandHandler::handleReset(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/reset request"));
+    Utils::printSerial(F("\nHandling /api/reset request"));
 
     if (!validateResetJWT(server)) {
         sendError(server, 401, ResponseMsg::UNAUTHORIZED);
@@ -580,7 +646,7 @@ void ESPCommandHandler::handleReset(WebServerType& server) {
 static bool _streamServerStarted = false;
 
 void ESPCommandHandler::handleCameraEnable(WebServerType& server) {
-    Utils::printSerial(F("Handling /api/camera/enable request"));
+    Utils::printSerial(F("\nHandling /api/camera/enable request"));
 
     if (!validateSessionToken(server)) {
         sendBinaryError(server, 401, BIN_STATUS_ERROR, "Unauthorized");

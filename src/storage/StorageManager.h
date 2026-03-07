@@ -106,6 +106,20 @@ public:
      * @return true if successful, false otherwise
      */
     static bool saveGPIOConfig(const GPIOConfigData& data);
+
+    /**
+     * @brief Load sleep mode enabled flag from flash.
+     * @param enabled  Output: true if sleep mode was previously enabled.
+     * @return true if a persisted value was found, false if no file exists.
+     */
+    static bool loadSleepEnabled(bool& enabled);
+
+    /**
+     * @brief Save sleep mode enabled flag to flash.
+     * @param enabled  true to enable sleep mode, false to disable.
+     * @return true if successful, false otherwise.
+     */
+    static bool saveSleepEnabled(bool enabled);
 };
 
 #endif // STORAGE_MANAGER_H

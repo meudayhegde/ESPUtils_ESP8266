@@ -25,6 +25,7 @@ namespace Config {
     const char GPIO_CONFIG_FILE[]        = "/GPIOConfig.bin";
     const char SESSION_FILE[]            = "/Session.json";
     const char BOUND_TOKEN_FILE[]        = "/BoundToken.bin";
+    const char SLEEP_CONFIG_FILE[]       = "/SleepConfig.bin";
 
 } // namespace Config
 

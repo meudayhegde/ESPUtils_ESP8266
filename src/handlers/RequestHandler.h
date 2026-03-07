@@ -25,7 +25,15 @@ public:
      * @param server WebServer instance
      */
     static void setupRoutes(WebServerType& server);
-    
+
+#if FEATURE_SLEEP_ENABLED
+    /**
+     * @brief Load persisted sleep mode from flash and apply WiFi sleep setting.
+     *        Call once from setup() after StorageManager::begin().
+     */
+    static void initSleep();
+#endif
+
 private:
     // Middleware
     /**
@@ -104,6 +112,18 @@ private:
     static void handleGPIOGet(WebServerType& server);
     static void handleRestart(WebServerType& server);
     static void handleReset(WebServerType& server);
+
+#if FEATURE_SLEEP_ENABLED
+    /**
+     * @brief PUT /api/sleep — enable or disable device sleep mode.
+     *        ESP32: WiFi modem light sleep. ESP8266: modem sleep.
+     *        Body: BinSleepRequest (1 byte)
+     */
+    static void handleSleep(WebServerType& server);
+
+    /** Current sleep-mode state (loaded from flash at boot). */
+    static bool _sleepEnabled;
+#endif
 
 #if defined(ESP_CAM_HW_EXIST)
     /**

@@ -33,6 +33,12 @@
     #define FEATURE_RANGE_EXTENDER_ENABLED 1
 #endif
 
+// Sleep mode — ESP32 light sleep / ESP8266 modem sleep
+// Reduces power consumption when enabled from the client
+#ifndef FEATURE_SLEEP_ENABLED
+    #define FEATURE_SLEEP_ENABLED 1
+#endif
+
 // Serial diagnostic logging via Utils::printSerial
 // Set to 0 in production to eliminate all log strings from flash
 #ifndef FEATURE_SERIAL_LOG_ENABLED

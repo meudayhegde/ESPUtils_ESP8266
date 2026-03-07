@@ -94,6 +94,7 @@ namespace Config {
     extern const char GPIO_CONFIG_FILE[];
     extern const char SESSION_FILE[];
     extern const char BOUND_TOKEN_FILE[];
+    extern const char SLEEP_CONFIG_FILE[];
 }
 
 // ================================

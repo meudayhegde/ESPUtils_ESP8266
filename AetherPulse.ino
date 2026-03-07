@@ -58,7 +58,12 @@ void setup() {
     
     // Initialize GPIO manager and apply stored settings
     GPIOManager::begin();
-    
+
+    // Load and apply persisted sleep mode setting
+#if FEATURE_SLEEP_ENABLED
+    ESPCommandHandler::initSleep();
+#endif
+
     // Initialize network
     WirelessNetworkManager::initWireless();
     WirelessNetworkManager::begin();

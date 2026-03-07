@@ -269,3 +269,44 @@ bool StorageManager::saveGPIOConfig(const GPIOConfigData& data) {
     }
     return ok;
 }
+
+bool StorageManager::loadSleepEnabled(bool& enabled) {
+    File file = LittleFS.open(Config::SLEEP_CONFIG_FILE, "r");
+    if (!file) {
+        Utils::printSerial(F("No sleep config file — defaulting to disabled."));
+        return false;
+    }
+
+    uint8_t val = 0;
+    bool ok = (file.read(&val, 1) == 1);
+    file.close();
+
+    if (ok) {
+        enabled = (val != 0);
+        Utils::printSerial(F("Sleep config loaded."));
+    } else {
+        Utils::printSerial(F("Sleep config read failed."));
+    }
+    return ok;
+}
+
+bool StorageManager::saveSleepEnabled(bool enabled) {
+    deleteFile(Config::SLEEP_CONFIG_FILE);
+
+    File file = LittleFS.open(Config::SLEEP_CONFIG_FILE, "w");
+    if (!file) {
+        Utils::printSerial(F("Failed to open sleep config for write."));
+        return false;
+    }
+
+    uint8_t val = enabled ? 1 : 0;
+    bool ok = (file.write(&val, 1) == 1);
+    file.close();
+
+    if (ok) {
+        Utils::printSerial(F("Sleep config saved."));
+    } else {
+        Utils::printSerial(F("Sleep config write failed."));
+    }
+    return ok;
+}

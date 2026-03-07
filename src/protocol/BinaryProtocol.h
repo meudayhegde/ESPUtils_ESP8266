@@ -74,8 +74,9 @@ struct BinDeviceInfoResponse {
     char     platform_key[24];
     char     wirelessMode[8];   // "AP", "WIFI", "AP_STA"
     uint8_t  isBound;
+    uint8_t  sleepEnabled;      // 0 = disabled, 1 = enabled
 };
-// Total: 12+20+18+64+8+4+32+24+8+1 = 191 bytes
+// Total: 12+20+18+64+8+4+32+24+8+1+1 = 192 bytes
 
 // ── GPIO ─────────────────────────────────────────────────────────────────────
 
@@ -287,6 +288,17 @@ struct BinCameraControl {
     int32_t value;
 };
 // Total: 5 bytes
+
+// ── Sleep mode ───────────────────────────────────────────────────────────────
+
+struct BinSleepRequest {
+    uint8_t enabled;  // 0 = disable sleep, 1 = enable sleep
+};
+
+struct BinSleepResponse {
+    uint8_t status;   // BIN_STATUS_OK or BIN_STATUS_ERROR
+    uint8_t enabled;  // current sleep mode state after applying
+};
 
 // ── Simple responses (restart, reset) ────────────────────────────────────────
 
