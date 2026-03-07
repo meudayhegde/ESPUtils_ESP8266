@@ -16,10 +16,13 @@
 // requires the low-level httpd API.
 
 #include "CameraHandler.h"
+#include "../hardware/camera/CameraManager.h"
+#include "BinaryHelper.h"
 
-// CameraHandler.h includes board_config.h which sets ESP_CAM_ENABLED when a
+// CameraHandler.h sets
+// ESP_CAM_HW_EXIST when a recognised camera board is selected.
 // camera-equipped board is selected.  No camera → entire file is compiled out.
-#if defined(ESP_CAM_ENABLED)
+#if defined(ESP_CAM_HW_EXIST)
 
 #include "esp_http_server.h"
 #include "esp_timer.h"
@@ -28,8 +31,7 @@
 #include "fb_gfx.h"
 #include "esp32-hal-ledc.h"
 #include "sdkconfig.h"
-#include "../hardware/camera/camera_index.h"
-#include "../hardware/camera/board_config.h"
+#include "../platform/Platform.h"
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -115,149 +117,182 @@ static int getQueryInt(WebServerType& server, const char* key, int defaultVal) {
 // -----------------------------------------------------------------------
 // Helper: print_reg (used by status handler)
 // -----------------------------------------------------------------------
-static int print_reg(char *p, sensor_t *s, uint16_t reg, uint32_t mask) {
-    return sprintf(p, "\"0x%x\":%u,", reg, s->get_reg(s, reg, mask));
+static int print_reg(char *p, size_t remaining, sensor_t *s, uint16_t reg, uint32_t mask) {
+    return snprintf(p, remaining, "\"0x%x\":%u,", reg, s->get_reg(s, reg, mask));
 }
 
 // -----------------------------------------------------------------------
 // Camera control handlers (Arduino WebServer, port 80)
 // -----------------------------------------------------------------------
 
-static void handleIndex(WebServerType& server) {
-    server.sendHeader("Content-Encoding", "gzip");
-    sensor_t *s = esp_camera_sensor_get();
-    if (s != NULL) {
-        const uint8_t *data;
-        size_t len;
-        if (s->id.PID == OV3660_PID) {
-            data = index_ov3660_html_gz;
-            len  = index_ov3660_html_gz_len;
-        } else if (s->id.PID == OV5640_PID) {
-            data = index_ov5640_html_gz;
-            len  = index_ov5640_html_gz_len;
-        } else {
-            data = index_ov2640_html_gz;
-            len  = index_ov2640_html_gz_len;
-        }
-        server.setContentLength(len);
-        server.send(200, "text/html", "");
-        server.sendContent((const char *)data, len);
-    } else {
-        log_e("Camera sensor not found");
-        server.send(500, "text/plain", "Camera sensor not found");
-    }
-}
-
 static void handleStatus(WebServerType& server) {
-    static char json_response[1024];
-    sensor_t   *s = esp_camera_sensor_get();
-    char       *p = json_response;
-    *p++ = '{';
-
-    if (s->id.PID == OV5640_PID || s->id.PID == OV3660_PID) {
-        for (int reg = 0x3400; reg < 0x3406; reg += 2) p += print_reg(p, s, reg, 0xFFF);
-        p += print_reg(p, s, 0x3406, 0xFF);
-        p += print_reg(p, s, 0x3500, 0xFFFF0);
-        p += print_reg(p, s, 0x3503, 0xFF);
-        p += print_reg(p, s, 0x350a, 0x3FF);
-        p += print_reg(p, s, 0x350c, 0xFFFF);
-        for (int reg = 0x5480; reg <= 0x5490; reg++) p += print_reg(p, s, reg, 0xFF);
-        for (int reg = 0x5380; reg <= 0x538b; reg++) p += print_reg(p, s, reg, 0xFF);
-        for (int reg = 0x5580; reg < 0x558a;  reg++) p += print_reg(p, s, reg, 0xFF);
-        p += print_reg(p, s, 0x558a, 0x1FF);
-    } else if (s->id.PID == OV2640_PID) {
-        p += print_reg(p, s, 0xd3,  0xFF);
-        p += print_reg(p, s, 0x111, 0xFF);
-        p += print_reg(p, s, 0x132, 0xFF);
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
     }
-
-    p += sprintf(p, "\"xclk\":%u,",           s->xclk_freq_hz / 1000000);
-    p += sprintf(p, "\"pixformat\":%u,",       s->pixformat);
-    p += sprintf(p, "\"framesize\":%u,",       s->status.framesize);
-    p += sprintf(p, "\"quality\":%u,",         s->status.quality);
-    p += sprintf(p, "\"brightness\":%d,",      s->status.brightness);
-    p += sprintf(p, "\"contrast\":%d,",        s->status.contrast);
-    p += sprintf(p, "\"saturation\":%d,",      s->status.saturation);
-    p += sprintf(p, "\"sharpness\":%d,",       s->status.sharpness);
-    p += sprintf(p, "\"special_effect\":%u,",  s->status.special_effect);
-    p += sprintf(p, "\"wb_mode\":%u,",         s->status.wb_mode);
-    p += sprintf(p, "\"awb\":%u,",             s->status.awb);
-    p += sprintf(p, "\"awb_gain\":%u,",        s->status.awb_gain);
-    p += sprintf(p, "\"aec\":%u,",             s->status.aec);
-    p += sprintf(p, "\"aec2\":%u,",            s->status.aec2);
-    p += sprintf(p, "\"ae_level\":%d,",        s->status.ae_level);
-    p += sprintf(p, "\"aec_value\":%u,",       s->status.aec_value);
-    p += sprintf(p, "\"agc\":%u,",             s->status.agc);
-    p += sprintf(p, "\"agc_gain\":%u,",        s->status.agc_gain);
-    p += sprintf(p, "\"gainceiling\":%u,",     s->status.gainceiling);
-    p += sprintf(p, "\"bpc\":%u,",             s->status.bpc);
-    p += sprintf(p, "\"wpc\":%u,",             s->status.wpc);
-    p += sprintf(p, "\"raw_gma\":%u,",         s->status.raw_gma);
-    p += sprintf(p, "\"lenc\":%u,",            s->status.lenc);
-    p += sprintf(p, "\"hmirror\":%u,",         s->status.hmirror);
-    p += sprintf(p, "\"vflip\":%u,",           s->status.vflip);
-    p += sprintf(p, "\"dcw\":%u,",             s->status.dcw);
-    p += sprintf(p, "\"colorbar\":%u",         s->status.colorbar);
+    // Build binary camera status + register entries
+    // Max registers: 46 (OV5640/OV3660) + 3 (OV2640) = 49 max
+    static uint8_t statusBuf[sizeof(BinCameraStatus) + 50 * sizeof(BinCameraRegEntry)];
+    
+    sensor_t *s = esp_camera_sensor_get();
+    BinCameraStatus* status = reinterpret_cast<BinCameraStatus*>(statusBuf);
+    memset(status, 0, sizeof(BinCameraStatus));
+    
+    status->xclk           = s->xclk_freq_hz / 1000000;
+    status->pixformat      = (uint8_t)s->pixformat;
+    status->framesize      = (uint8_t)s->status.framesize;
+    status->quality        = (uint8_t)s->status.quality;
+    status->brightness     = (int8_t)s->status.brightness;
+    status->contrast       = (int8_t)s->status.contrast;
+    status->saturation     = (int8_t)s->status.saturation;
+    status->sharpness      = (int8_t)s->status.sharpness;
+    status->special_effect = (uint8_t)s->status.special_effect;
+    status->wb_mode        = (uint8_t)s->status.wb_mode;
+    status->awb            = (uint8_t)s->status.awb;
+    status->awb_gain       = (uint8_t)s->status.awb_gain;
+    status->aec            = (uint8_t)s->status.aec;
+    status->aec2           = (uint8_t)s->status.aec2;
+    status->ae_level       = (int8_t)s->status.ae_level;
+    status->aec_value      = (uint16_t)s->status.aec_value;
+    status->agc            = (uint8_t)s->status.agc;
+    status->agc_gain       = (uint8_t)s->status.agc_gain;
+    status->gainceiling    = (uint8_t)s->status.gainceiling;
+    status->bpc            = (uint8_t)s->status.bpc;
+    status->wpc            = (uint8_t)s->status.wpc;
+    status->raw_gma        = (uint8_t)s->status.raw_gma;
+    status->lenc           = (uint8_t)s->status.lenc;
+    status->hmirror        = (uint8_t)s->status.hmirror;
+    status->vflip          = (uint8_t)s->status.vflip;
+    status->dcw            = (uint8_t)s->status.dcw;
+    status->colorbar       = (uint8_t)s->status.colorbar;
 #if defined(LED_GPIO_NUM)
-    p += sprintf(p, ",\"led_intensity\":%u", led_duty);
+    status->led_intensity  = (int16_t)led_duty;
 #else
-    p += sprintf(p, ",\"led_intensity\":%d", -1);
+    status->led_intensity  = -1;
 #endif
-    *p++ = '}';
-    *p++ = 0;
-
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json", json_response);
+    
+    // Append sensor-specific register entries
+    BinCameraRegEntry* regs = reinterpret_cast<BinCameraRegEntry*>(statusBuf + sizeof(BinCameraStatus));
+    uint8_t regCount = 0;
+    
+    if (s->id.PID == OV5640_PID || s->id.PID == OV3660_PID) {
+        // OV5640/OV3660 registers
+        for (int reg = 0x3400; reg < 0x3406; reg += 2) {
+            regs[regCount].addr = (uint16_t)reg;
+            regs[regCount].value = (int32_t)s->get_reg(s, reg, 0xFFF);
+            regCount++;
+        }
+        static const uint16_t singleRegs[] = {0x3406, 0x3500, 0x3503, 0x350a, 0x350c};
+        static const uint32_t singleMasks[] = {0xFF, 0xFFFF0, 0xFF, 0x3FF, 0xFFFF};
+        for (int i = 0; i < 5; i++) {
+            regs[regCount].addr = singleRegs[i];
+            regs[regCount].value = (int32_t)s->get_reg(s, singleRegs[i], singleMasks[i]);
+            regCount++;
+        }
+        for (int reg = 0x5480; reg <= 0x5490; reg++) {
+            regs[regCount].addr = (uint16_t)reg;
+            regs[regCount].value = (int32_t)s->get_reg(s, reg, 0xFF);
+            regCount++;
+        }
+        for (int reg = 0x5380; reg <= 0x538b; reg++) {
+            regs[regCount].addr = (uint16_t)reg;
+            regs[regCount].value = (int32_t)s->get_reg(s, reg, 0xFF);
+            regCount++;
+        }
+        for (int reg = 0x5580; reg < 0x558a; reg++) {
+            regs[regCount].addr = (uint16_t)reg;
+            regs[regCount].value = (int32_t)s->get_reg(s, reg, 0xFF);
+            regCount++;
+        }
+        regs[regCount].addr = 0x558a;
+        regs[regCount].value = (int32_t)s->get_reg(s, 0x558a, 0x1FF);
+        regCount++;
+    } else if (s->id.PID == OV2640_PID) {
+        static const uint16_t ov2640Regs[] = {0xd3, 0x111, 0x132};
+        for (int i = 0; i < 3; i++) {
+            regs[regCount].addr = ov2640Regs[i];
+            regs[regCount].value = (int32_t)s->get_reg(s, ov2640Regs[i], 0xFF);
+            regCount++;
+        }
+    }
+    
+    status->regCount = regCount;
+    size_t totalLen = sizeof(BinCameraStatus) + regCount * sizeof(BinCameraRegEntry);
+    sendBinaryResponse(server, 200, statusBuf, totalLen);
 }
 
 static void handleCmd(WebServerType& server) {
-    if (!server.hasArg("var") || !server.hasArg("val")) {
-        server.send(404, "text/plain", "Variable not found");
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
         return;
     }
-    String variable = server.arg("var");
-    int    val      = server.arg("val").toInt();
-    sensor_t *s     = esp_camera_sensor_get();
-    int       res   = 0;
-
-    if      (variable == "framesize")      { if (s->pixformat == PIXFORMAT_JPEG) res = s->set_framesize(s, (framesize_t)val); }
-    else if (variable == "quality")         res = s->set_quality(s, val);
-    else if (variable == "contrast")        res = s->set_contrast(s, val);
-    else if (variable == "brightness")      res = s->set_brightness(s, val);
-    else if (variable == "saturation")      res = s->set_saturation(s, val);
-    else if (variable == "gainceiling")     res = s->set_gainceiling(s, (gainceiling_t)val);
-    else if (variable == "colorbar")        res = s->set_colorbar(s, val);
-    else if (variable == "awb")             res = s->set_whitebal(s, val);
-    else if (variable == "agc")             res = s->set_gain_ctrl(s, val);
-    else if (variable == "aec")             res = s->set_exposure_ctrl(s, val);
-    else if (variable == "hmirror")         res = s->set_hmirror(s, val);
-    else if (variable == "vflip")           res = s->set_vflip(s, val);
-    else if (variable == "awb_gain")        res = s->set_awb_gain(s, val);
-    else if (variable == "agc_gain")        res = s->set_agc_gain(s, val);
-    else if (variable == "aec_value")       res = s->set_aec_value(s, val);
-    else if (variable == "aec2")            res = s->set_aec2(s, val);
-    else if (variable == "dcw")             res = s->set_dcw(s, val);
-    else if (variable == "bpc")             res = s->set_bpc(s, val);
-    else if (variable == "wpc")             res = s->set_wpc(s, val);
-    else if (variable == "raw_gma")         res = s->set_raw_gma(s, val);
-    else if (variable == "lenc")            res = s->set_lenc(s, val);
-    else if (variable == "special_effect")  res = s->set_special_effect(s, val);
-    else if (variable == "wb_mode")         res = s->set_wb_mode(s, val);
-    else if (variable == "ae_level")        res = s->set_ae_level(s, val);
-#if defined(LED_GPIO_NUM)
-    else if (variable == "led_intensity") {
-        led_duty = val;
-        if (isStreaming) enable_led(true);
+    
+    // Read binary control struct from body
+    BinCameraControl ctrl;
+    size_t bytesRead = readBinaryBody(server, &ctrl, sizeof(ctrl));
+    if (bytesRead < sizeof(ctrl)) {
+        sendBinaryError(server, 400, BIN_STATUS_ERROR, "Invalid control data");
+        return;
     }
-#endif
-    else { log_i("Unknown command: %s", variable.c_str()); res = -1; }
+    
+    sensor_t *s = esp_camera_sensor_get();
+    int val = ctrl.value;
+    int res = 0;
 
-    if (res < 0) { server.send(500, "text/plain", ""); return; }
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "text/plain", "");
+    switch (ctrl.varId) {
+        case CAM_VAR_FRAMESIZE:
+            if (s->pixformat == PIXFORMAT_JPEG)
+                res = s->set_framesize(s, (framesize_t)val);
+            break;
+        case CAM_VAR_QUALITY:        res = s->set_quality(s, val); break;
+        case CAM_VAR_CONTRAST:       res = s->set_contrast(s, val); break;
+        case CAM_VAR_BRIGHTNESS:     res = s->set_brightness(s, val); break;
+        case CAM_VAR_SATURATION:     res = s->set_saturation(s, val); break;
+        case CAM_VAR_GAINCEILING:    res = s->set_gainceiling(s, (gainceiling_t)val); break;
+        case CAM_VAR_COLORBAR:       res = s->set_colorbar(s, val); break;
+        case CAM_VAR_AWB:            res = s->set_whitebal(s, val); break;
+        case CAM_VAR_AGC:            res = s->set_gain_ctrl(s, val); break;
+        case CAM_VAR_AEC:            res = s->set_exposure_ctrl(s, val); break;
+        case CAM_VAR_HMIRROR:        res = s->set_hmirror(s, val); break;
+        case CAM_VAR_VFLIP:          res = s->set_vflip(s, val); break;
+        case CAM_VAR_AWB_GAIN:       res = s->set_awb_gain(s, val); break;
+        case CAM_VAR_AGC_GAIN:       res = s->set_agc_gain(s, val); break;
+        case CAM_VAR_AEC_VALUE:      res = s->set_aec_value(s, val); break;
+        case CAM_VAR_AEC2:           res = s->set_aec2(s, val); break;
+        case CAM_VAR_DCW:            res = s->set_dcw(s, val); break;
+        case CAM_VAR_BPC:            res = s->set_bpc(s, val); break;
+        case CAM_VAR_WPC:            res = s->set_wpc(s, val); break;
+        case CAM_VAR_RAW_GMA:        res = s->set_raw_gma(s, val); break;
+        case CAM_VAR_LENC:           res = s->set_lenc(s, val); break;
+        case CAM_VAR_SPECIAL_EFFECT: res = s->set_special_effect(s, val); break;
+        case CAM_VAR_WB_MODE:        res = s->set_wb_mode(s, val); break;
+        case CAM_VAR_AE_LEVEL:       res = s->set_ae_level(s, val); break;
+#if defined(LED_GPIO_NUM)
+        case CAM_VAR_LED_INTENSITY:
+            led_duty = val;
+            if (isStreaming) enable_led(true);
+            break;
+#endif
+        default:
+            log_i("Unknown camera varId: %u", ctrl.varId);
+            res = -1;
+            break;
+    }
+
+    if (res < 0) {
+        sendBinaryError(server, 500, BIN_STATUS_ERROR, "Control failed");
+        return;
+    }
+    BinSimpleResponse ok;
+    ok.status = BIN_STATUS_OK;
+    sendBinaryResponse(server, 200, &ok, sizeof(ok));
 }
 
 static void handleCapture(WebServerType& server) {
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
+    }
     camera_fb_t *fb = NULL;
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     int64_t fr_start = esp_timer_get_time();
@@ -312,6 +347,10 @@ static void handleCapture(WebServerType& server) {
 }
 
 static void handleBmp(WebServerType& server) {
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
+    }
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
     uint64_t fr_start = esp_timer_get_time();
 #endif
@@ -346,6 +385,10 @@ static void handleBmp(WebServerType& server) {
 }
 
 static void handleXclk(WebServerType& server) {
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
+    }
     if (!server.hasArg("xclk")) {
         server.send(404, "text/plain", "Variable not found");
         return;
@@ -358,6 +401,10 @@ static void handleXclk(WebServerType& server) {
 }
 
 static void handleReg(WebServerType& server) {
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
+    }
     if (!server.hasArg("reg") || !server.hasArg("mask") || !server.hasArg("val")) {
         server.send(404, "text/plain", "Variable not found");
         return;
@@ -372,6 +419,10 @@ static void handleReg(WebServerType& server) {
 }
 
 static void handleGreg(WebServerType& server) {
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
+    }
     if (!server.hasArg("reg") || !server.hasArg("mask")) {
         server.send(404, "text/plain", "Variable not found");
         return;
@@ -384,6 +435,10 @@ static void handleGreg(WebServerType& server) {
 }
 
 static void handlePll(WebServerType& server) {
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
+    }
     int bypass = getQueryInt(server, "bypass", 0);
     int mul    = getQueryInt(server, "mul",    0);
     int sys    = getQueryInt(server, "sys",    0);
@@ -400,6 +455,10 @@ static void handlePll(WebServerType& server) {
 }
 
 static void handleWin(WebServerType& server) {
+    if (!CameraManager::isEnabled()) {
+        sendBinaryError(server, 503, BIN_STATUS_ERROR, "Camera is disabled");
+        return;
+    }
     int startX  = getQueryInt(server, "sx",   0);
     int startY  = getQueryInt(server, "sy",   0);
     int endX    = getQueryInt(server, "ex",   0);
@@ -425,12 +484,19 @@ static void handleWin(WebServerType& server) {
 // MJPEG stream handler (ESP-IDF httpd — separate server on port 81)
 // -----------------------------------------------------------------------
 static esp_err_t stream_handler(httpd_req_t *req) {
+    if (!CameraManager::isEnabled()) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Camera is disabled\"}");
+        return ESP_FAIL;
+    }
+
     camera_fb_t     *fb = NULL;
     struct timeval   _timestamp;
     esp_err_t        res = ESP_OK;
     size_t           _jpg_buf_len = 0;
     uint8_t         *_jpg_buf = NULL;
-    char            *part_buf[128];
+    char             part_buf[128];
     static int64_t   last_frame = 0;
 
     if (!last_frame) last_frame = esp_timer_get_time();
@@ -471,9 +537,9 @@ static esp_err_t stream_handler(httpd_req_t *req) {
             res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
         if (res == ESP_OK) {
             size_t hlen = snprintf(
-                (char *)part_buf, 128, _STREAM_PART,
+                part_buf, sizeof(part_buf), _STREAM_PART,
                 _jpg_buf_len, _timestamp.tv_sec, _timestamp.tv_usec);
-            res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
+            res = httpd_resp_send_chunk(req, part_buf, hlen);
         }
         if (res == ESP_OK)
             res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
@@ -517,9 +583,8 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 void CameraHandler::setupRoutes(WebServerType& server) {
     ra_filter_init(&ra_filter, 20);
 
-    server.on("/",           HTTP_GET, [&server]() { handleIndex(server); });
     server.on("/status",     HTTP_GET, [&server]() { handleStatus(server); });
-    server.on("/control",    HTTP_GET, [&server]() { handleCmd(server); });
+    server.on("/control",    HTTP_POST, [&server]() { handleCmd(server); }, rawBodyStub);
     server.on("/capture",    HTTP_GET, [&server]() { handleCapture(server); });
     server.on("/bmp",        HTTP_GET, [&server]() { handleBmp(server); });
     server.on("/xclk",       HTTP_GET, [&server]() { handleXclk(server); });
@@ -561,4 +626,4 @@ void CameraHandler::setupLedFlash() {
 #endif
 }
 
-#endif  // ESP_CAM_ENABLED
+#endif  // ESP_CAM_HW_EXIST

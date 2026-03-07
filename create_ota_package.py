@@ -27,7 +27,7 @@ def get_input_file():
     while (_bin_file_path is None) or (not (os.path.exists(_bin_file_path) and os.path.isfile(_bin_file_path))):
         print('File {} doesn\'t exist or cannot access, please provide a correct file path.'.format(_bin_file_path))
         print('-' * terminal_length())
-        _bin_file_path = eval(input('Drag and drop the Arduino compiled binary file here:\n'))
+        _bin_file_path = input('Drag and drop the Arduino compiled binary file here:\n').strip().strip("'\"")
 
     print('-' * terminal_length())
     print('File name:', basename(_bin_file_path))
@@ -51,7 +51,7 @@ def get_destination_dir(bin_path: str):
 
     while not dir_confirmed:
         print('-' * terminal_length())
-        _parent_dir = eval(input("Drag and drop the \"Destination directory\" here:\n"))
+        _parent_dir = input("Drag and drop the \"Destination directory\" here:\n").strip().strip("'\"")
         if os.path.exists(_parent_dir) and os.path.isdir(_parent_dir):
             dir_confirmed = True
             continue

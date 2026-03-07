@@ -33,6 +33,15 @@ public:
      */
     static void logout();
 
+    /**
+     * @brief Validate JWT token for reset endpoint
+     *        Validates challenge, signature, and ensures sub matches bound sub (owner only)
+     * @param jwt JWT token string
+     * @param jwtLen Length of JWT token
+     * @return true if valid for reset (sub matches bound sub), false otherwise
+     */
+    static bool validateResetJWT(const char* jwt, size_t jwtLen);
+
 private:
     static void initPublicKey();
 

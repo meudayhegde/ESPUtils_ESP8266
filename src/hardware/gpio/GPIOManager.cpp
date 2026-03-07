@@ -3,129 +3,130 @@
 
 void GPIOManager::begin() {
     Utils::printSerial(F("## Apply GPIO settings."));
-    applyGPIO(-1, "", 0);
+    BinGpioSetResponse dummy;
+    applyGPIO(-1, 0, 0, &dummy);
 }
 
-void GPIOManager::applyPinConfig(int pinNumber, const char* mode, int pinValue) {
-    if (strcmp(mode, "OUTPUT") == 0) {
-        pinMode(pinNumber, OUTPUT);
-        digitalWrite(pinNumber, pinValue);
-    } else if (strcmp(mode, "INPUT") == 0) {
-        pinMode(pinNumber, INPUT);
-    } else if (strcmp(mode, "INPUT_PULLUP") == 0) {
-        pinMode(pinNumber, INPUT_PULLUP);
+void GPIOManager::applyPinConfig(int pinNumber, uint8_t mode, int pinValue) {
+    switch (mode) {
+        case AP_GPIO_OUTPUT:
+            pinMode(pinNumber, OUTPUT);
+            digitalWrite(pinNumber, pinValue);
+            break;
+        case AP_GPIO_INPUT:
+            pinMode(pinNumber, INPUT);
+            break;
+        case AP_GPIO_INPUT_PULLUP:
+            pinMode(pinNumber, INPUT_PULLUP);
+            break;
+#ifdef INPUT_PULLDOWN
+        case AP_GPIO_INPUT_PULLDOWN:
+            pinMode(pinNumber, INPUT_PULLDOWN);
+            break;
+#endif
+        default:
+            break;
     }
 }
 
-JsonDocument GPIOManager::loadGPIOConfigs() {
-    JsonDocument doc;
-    
-    File file = LittleFS.open(Config::GPIO_CONFIG_FILE, "r");
-    if (!file) {
-        Utils::printSerial(F("GPIO config file not found, using defaults."));
-        // Return empty array
-        doc.to<JsonArray>();
-        return doc;
-    }
-    
-    DeserializationError error = deserializeJson(doc, file);
-    file.close();
-    
-    if (error) {
-        Utils::printSerial(F("Failed to parse GPIO config, using defaults."));
-        doc.clear();
-        doc.to<JsonArray>();
-    }
-    
-    return doc;
-}
-
-bool GPIOManager::saveGPIOConfigs(const JsonDocument& doc) {
-    return StorageManager::writeJson(Config::GPIO_CONFIG_FILE, doc);
-}
-
-String GPIOManager::applyGPIO(int pinNumber, const char* mode, int pinValue) {
+void GPIOManager::applyGPIO(int pinNumber, uint8_t mode, int pinValue,
+                            BinGpioSetResponse* resp) {
     Utils::printSerial(F("Applying GPIO settings..."));
-    JsonDocument doc = loadGPIOConfigs();
-    JsonArray array = doc.as<JsonArray>();
-    
+
+    GPIOConfigData data;
+    StorageManager::loadGPIOConfig(data); // ok if missing — count stays 0
+
+    memset(resp, 0, sizeof(BinGpioSetResponse));
     bool pinConfigExists = false;
     int returnPinValue = -1;
+
     // Iterate through existing configs
-    for (JsonVariant gpio : array) {
-        int pin = gpio["pinNumber"];
-        int currentValue = gpio["pinValue"];
-        
+    for (uint8_t i = 0; i < data.count; ++i) {
+        GPIOConfig& cfg = data.pins[i];
+
         // Update settings for specific pin
-        if (pinNumber != -1 && pin == pinNumber) {
+        if (pinNumber != -1 && cfg.pinNumber == pinNumber) {
             pinConfigExists = true;
-            gpio["pinMode"] = mode;
-            
+            cfg.mode = mode;
+
             // Toggle if pinValue is -1
             if (pinValue == -1) {
-                gpio["pinValue"] = (currentValue == LOW) ? HIGH : LOW;
+                cfg.pinValue = (cfg.pinValue == LOW) ? HIGH : LOW;
             } else {
-                gpio["pinValue"] = pinValue;
+                cfg.pinValue = pinValue;
             }
         }
-        
+
         // Apply settings (either all if pinNumber == -1, or specific pin)
-        if (pinNumber == -1 || pin == pinNumber) {
-            const char* pinMode = gpio["pinMode"];
-            int value = gpio["pinValue"];
-            
-            applyPinConfig(pin, pinMode, value);
-            returnPinValue = value;
+        if (pinNumber == -1 || cfg.pinNumber == pinNumber) {
+            applyPinConfig(cfg.pinNumber, cfg.mode, cfg.pinValue);
+            returnPinValue = cfg.pinValue;
         }
     }
-    
+
     // Create new config entry if pin doesn't exist
     if (pinNumber != -1 && !pinConfigExists) {
-        JsonObject newPin = array.createNestedObject();
-        newPin["pinNumber"] = pinNumber;
-        newPin["pinMode"] = mode;
-        newPin["pinValue"] = pinValue;
-        
-        applyPinConfig(pinNumber, mode, pinValue);
-        returnPinValue = pinValue;
+        if (data.count < MAX_GPIO_PINS) {
+            data.pins[data.count] = GPIOConfig(pinNumber, mode, pinValue);
+            data.count++;
+
+            applyPinConfig(pinNumber, mode, pinValue);
+            returnPinValue = pinValue;
+        } else {
+            Utils::printSerial(F("Max GPIO configs reached."));
+            resp->status = BIN_STATUS_ERROR;
+            resp->pinValue = -1;
+            strncpy(resp->error, "Max GPIO configs", sizeof(resp->error) - 1);
+            return;
+        }
     }
-    
+
     // Save updated configuration
     if (pinNumber != -1) {
-        if (!saveGPIOConfigs(doc)) {
+        if (!StorageManager::saveGPIOConfig(data)) {
             Utils::printSerial(F("Failed to save GPIO configuration."));
-            return F("{\"response\":\"failure\",\"error\":\"Failed to save config\"}");
+            resp->status = BIN_STATUS_ERROR;
+            resp->pinValue = -1;
+            strncpy(resp->error, "Failed to save config", sizeof(resp->error) - 1);
+            return;
         }
     }
-    
-    char response[64];
-    snprintf(response, sizeof(response), "{\"response\":\"success\",\"pinValue\":%d}", returnPinValue);
-    return String(response);
+
+    resp->status = BIN_STATUS_OK;
+    resp->pinValue = returnPinValue;
 }
 
-String GPIOManager::getGPIO(int pinNumber) {
+void GPIOManager::getGPIO(int pinNumber, BinGpioGetHeader* header,
+                          BinGpioPin* pins) {
+    GPIOConfigData data;
+    StorageManager::loadGPIOConfig(data);
+
+    header->status = BIN_STATUS_OK;
+
     if (pinNumber == -1) {
-        // Return all GPIO configs
-        String configs = StorageManager::readFile(Config::GPIO_CONFIG_FILE);
-        return configs.length() > 0 ? configs : F("[]");
+        // Return all pins
+        header->count = data.count;
+        for (uint8_t i = 0; i < data.count; ++i) {
+            pins[i].pinNumber = data.pins[i].pinNumber;
+            pins[i].pinMode   = data.pins[i].mode;
+            pins[i].pinValue  = data.pins[i].pinValue;
+        }
+        return;
     }
-    
-    JsonDocument doc = loadGPIOConfigs();
-    JsonArray array = doc.as<JsonArray>();
-    
-    // Find specific pin configuration
-    for (JsonVariant gpio : array) {
-        int pin = gpio["pinNumber"];
-        
-        if (pin == pinNumber) {
-            String output;
-            output.reserve(128); // Pre-allocate estimated size
-            serializeJson(gpio, output);
-            return output;
+
+    // Find specific pin
+    for (uint8_t i = 0; i < data.count; ++i) {
+        if (data.pins[i].pinNumber == pinNumber) {
+            header->count = 1;
+            pins[0].pinNumber = data.pins[i].pinNumber;
+            pins[0].pinMode   = data.pins[i].mode;
+            pins[0].pinValue  = data.pins[i].pinValue;
+            return;
         }
     }
-    
-    return F("{}");
+
+    // Pin not found — return empty
+    header->count = 0;
 }
 
 bool GPIOManager::checkResetState(int pinNumber) {

@@ -7,15 +7,10 @@
 #include <IRremoteESP8266.h>
 #include <IRtext.h>
 #include <IRutils.h>
-#include <ArduinoJson.h>
 #include "../../config/Config.h"
 #include "../../utils/Utils.h"
-
-#ifdef ARDUINO_ARCH_ESP8266
-    #include <ESP8266WiFi.h>
-#elif ARDUINO_ARCH_ESP32
-    #include <WiFi.h>
-#endif
+#include "../../platform/Platform.h"
+#include "../../protocol/BinaryProtocol.h"
 
 class IRManager {
 private:
@@ -30,28 +25,38 @@ public:
     static void begin();
     
     /**
-     * @brief Capture IR signal from remote control
-     * @param multiCapture Enable multi-capture mode
-     * @param client WiFiClient for streaming results
-     * @return JSON response string
+     * @brief Capture IR signal and stream results via SSE.
+     *        captureMode: 0 = single capture, 1 = multi-capture (stays open until timeout)
+     *        Sends HTTP 200 text/event-stream directly; caller must NOT send any additional
+     *        response after calling this function.
+     *        SSE event data fields are base64-encoded binary structs.
+     * @param captureMode 0=single, 1=multi
+     * @param server WebServer instance (response sent inside)
      */
-    static String captureIR(bool multiCapture, WiFiClient& client);
+    static void captureIR(int captureMode, WebServerType& server);
     
     /**
-     * @brief Send IR signal
-     * @param size Data size
-     * @param protocol Protocol name
-     * @param irData IR data (hex string or array)
-     * @return JSON response string
+     * @brief Send IR signal (binary interface)
+     * @param protocol Protocol name string
+     * @param bitLength Bit length / raw size
+     * @param irCode   IR code data (hex string or array string)
+     * @param irCodeLen Length of irCode string
+     * @param resp     Pointer to BinIrSendResponse to fill
      */
-    static String sendIR(uint16_t size, const char* protocol, const char* irData);
+    static void sendIR(const char* protocol, uint16_t bitLength,
+                       const char* irCode, uint16_t irCodeLen,
+                       BinIrSendResponse* resp);
     
     /**
-     * @brief Generate IR result JSON from decode_results
+     * @brief Generate binary IR capture event from decode_results.
+     *        Writes header + irCode data into caller-provided buffer.
      * @param results Pointer to decode_results
-     * @return JSON string with IR data
+     * @param buf     Output buffer (must be large enough)
+     * @param bufSize Size of output buffer
+     * @return Total bytes written (header + irCode data), or 0 on error
      */
-    static String generateIRResult(const decode_results* results);
+    static size_t generateIRResult(const decode_results* results,
+                                   uint8_t* buf, size_t bufSize);
     
 private:
     /**

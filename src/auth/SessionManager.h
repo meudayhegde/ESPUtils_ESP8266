@@ -57,7 +57,7 @@ public:
      * @brief Validate an opaque session token against all active slots.
      * @return true if a matching, non-expired slot exists.
      */
-    static bool validateSession(const String& sessionToken);
+    static bool validateSession(const char* sessionToken);
 
     /**
      * @brief Invalidate all active in-RAM sessions (logout-all / factory reset).
@@ -91,8 +91,8 @@ public:
 
     // ── Challenge management ──────────────────────────────────────────────────
 
-    /** @return Current challenge string, refreshing stale one automatically. */
-    static String getCurrentChallenge();
+    /** @return Current challenge C-string (8 chars + NUL), refreshed automatically. */
+    static const char* getCurrentChallenge();
 
     /** @brief Refresh challenge if the refresh interval has elapsed. */
     static void updateChallenge();
@@ -104,23 +104,23 @@ private:
     static char s_boundSub[64];
     static bool s_hasBoundSub;
 
-    // Challenge
-    static String        s_challengeString;
+    // Challenge — 8-char alphanumeric + NUL  (no heap allocation)
+    static char          s_challengeString[9];
     static unsigned long s_challengeGeneratedTime;
     static const unsigned long CHALLENGE_REFRESH_INTERVAL = 300000UL; // 5 min
 
-    // Deferred flash write for bound JWT
-    static bool   s_pendingBind;
-    static String s_pendingBindJWT;
-    static String s_pendingBindSub;
+    // Deferred flash write for bound JWT — fixed-size buffers prevent fragmentation
+    static bool s_pendingBind;
+    static char s_pendingBindJWT[512]; // sized for max ES256 JWT
+    static char s_pendingBindSub[64];  // sized for sub claim
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Fill @p buf (41 bytes) with a new 40-character hex session token. */
     static void generateSessionToken(char* buf, size_t bufLen);
 
-    /** Generate a fresh 8-character alphanumeric challenge. */
-    static String generateChallengeString();
+    /** Fill s_challengeString (8 chars + NUL) with random alphanumeric chars. */
+    static void generateChallengeString();
 
     /** Index of slot whose sub matches @p sub, or -1. */
     static int findSlotBySub(const char* sub);

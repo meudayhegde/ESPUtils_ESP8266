@@ -4,13 +4,13 @@
 #include <ArduinoJson.h>
 
 // Cryptographic includes
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266)
     #include <bearssl/bearssl_hash.h>
     #include <bearssl/bearssl_ec.h>
     #include <bearssl/bearssl_pem.h>
     #include <WiFiClientSecureBearSSL.h>
     #include <StackThunk.h>
-#elif ARDUINO_ARCH_ESP32
+#elif defined(ARDUINO_ARCH_ESP32)
     #include "mbedtls/ecdsa.h"
     #include "mbedtls/sha256.h"
     #include "mbedtls/pk.h"
@@ -122,7 +122,7 @@ static size_t rawToAsn1Der(const uint8_t* rawSig, size_t rawLen, uint8_t* derSig
 #endif
 
 // ── Cached public key (parsed once at begin()) ──
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266)
 static bool             s_pubKeyReady = false;
 static uint8_t          s_pubKeyQ[65];       // 0x04 || X || Y (65 bytes, uncompressed point)
 static br_ec_public_key s_brPubKey;
@@ -146,7 +146,7 @@ extern "C" void ecdsa_vrfy_on_heap_stack() {
 make_stack_thunk(ecdsa_vrfy_on_heap_stack)
 extern "C" void thunk_ecdsa_vrfy_on_heap_stack();
 
-#elif ARDUINO_ARCH_ESP32
+#elif defined(ARDUINO_ARCH_ESP32)
 static bool               s_pubKeyReady = false;
 static mbedtls_pk_context s_pkCtx;
 #endif
@@ -158,7 +158,7 @@ static char s_parsedFamily[64] = {};
 void AuthManager::begin() {
     Utils::printSerial(F("## Load Auth module..."));
 
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266)
     // Pre-allocate the 5.6 KB heap stack used by the BearSSL ECDSA thunk.
     stack_thunk_add_ref();
 #endif
@@ -217,11 +217,42 @@ String AuthManager::authenticateWithJWT(const char* jwt, size_t jwtLen) {
 }
 
 bool AuthManager::validateSession(const String& sessionToken) {
-    return SessionManager::validateSession(sessionToken);
+    return SessionManager::validateSession(sessionToken.c_str());
 }
 
 void AuthManager::logout() {
     SessionManager::invalidateSession();
+}
+
+bool AuthManager::validateResetJWT(const char* jwt, size_t jwtLen) {
+    Utils::printSerial(F("Validating JWT for reset..."));
+
+    // First, verify the JWT with challenge check
+    if (!verifyAndParseJWT(jwt, jwtLen, true)) {
+        Utils::printSerial(F("JWT validation failed for reset."));
+        return false;
+    }
+
+    // Check if device is bound
+    if (!SessionManager::hasBoundSub()) {
+        Utils::printSerial(F("Reset attempted on unbound device."));
+        return false;
+    }
+
+    // Get the bound sub
+    const char* boundSub = SessionManager::getBoundSub();
+    
+    // For reset, we require exact sub match (not family)
+    // s_parsedSub is populated by verifyAndParseJWT
+    if (strcmp(s_parsedSub, boundSub) != 0) {
+        Utils::printSerial(F("Reset JWT sub does not match bound sub."));
+        Utils::printSerial(F("  bound sub: "), boundSub);
+        Utils::printSerial(F("  JWT sub  : "), s_parsedSub);
+        return false;
+    }
+
+    Utils::printSerial(F("Reset JWT validated successfully."));
+    return true;
 }
 
 void AuthManager::loadAndVerifyBoundToken() {
@@ -250,7 +281,7 @@ void AuthManager::loadAndVerifyBoundToken() {
 }
 
 void AuthManager::initPublicKey() {
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266)
     const char* pem      = Config::JWT_PUB_KEY;
     const char* b64Start = strstr(pem, "-----BEGIN PUBLIC KEY-----");
     if (!b64Start) { Utils::printSerial(F("\nPEM: no begin marker")); return; }
@@ -279,7 +310,7 @@ void AuthManager::initPublicKey() {
     }
     Utils::printSerial(F("PEM: EC point not found"));
 
-#elif ARDUINO_ARCH_ESP32
+#elif defined(ARDUINO_ARCH_ESP32)
     mbedtls_pk_init(&s_pkCtx);
     int ret = mbedtls_pk_parse_public_key(
         &s_pkCtx,
@@ -359,13 +390,13 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen, bool verifyC
 
         // Challenge check — fast fail before expensive ECDSA
         if (verifyChallenge) {
-            const char* challenge = payDoc["challenge"] | "";
-            String currentChallenge = SessionManager::getCurrentChallenge();
+            const char* challenge        = payDoc["challenge"] | "";
+            const char* currentChallenge = SessionManager::getCurrentChallenge();
             Utils::printSerial(F("  token challenge : ["), challenge);
             Utils::printSerial(F("]\n  device challenge: ["), currentChallenge);
             Utils::printSerial(F("]"));
 
-            if (challenge[0] == '\0' || currentChallenge != challenge) {
+            if (challenge[0] == '\0' || strcmp(currentChallenge, challenge) != 0) {
                 Utils::printSerial(F("JWT: invalid challenge"));
                 return false;
             }
@@ -374,12 +405,12 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen, bool verifyC
 
     // ── 4. SHA-256 over header.payload ──
     static uint8_t hash[32];
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266)
     static br_sha256_context shaCtx;  // ~220 bytes — must NOT be on stack
     br_sha256_init(&shaCtx);
     br_sha256_update(&shaCtx, jwt, d2);
     br_sha256_out(&shaCtx, hash);
-#elif ARDUINO_ARCH_ESP32
+#elif defined(ARDUINO_ARCH_ESP32)
     mbedtls_sha256_context shaCtx;
     mbedtls_sha256_init(&shaCtx);
     mbedtls_sha256_starts(&shaCtx, 0);
@@ -391,9 +422,8 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen, bool verifyC
     // ── 5. Decode signature (strict) ──
     static uint8_t sig[64];
     size_t sigDecLen = b64urlDecodeStrict(sigB64, sigLen, sig, sizeof(sig));
-    Utils::printSerial(F("DBG sig b64len="), sigLen);
-    Utils::printSerial(F(" decoded="), sigDecLen);
-    Utils::printSerial(F(""));
+    DEBUG_LOG_VAL("sig b64len", sigLen);
+    DEBUG_LOG_VAL("sig decoded bytes", sigDecLen);
 
     if (sigDecLen != 64) {
         Utils::printSerial(F("JWT: invalid signature encoding"));
@@ -401,18 +431,18 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen, bool verifyC
     }
 
     // ── 6. ECDSA verify (most expensive — done last) ──
-    Utils::printSerial(F("DBG pubKeyReady=")), s_pubKeyReady ? F("true\n") : F("false\n");
+    DEBUG_LOG_VAL("pubKeyReady", s_pubKeyReady ? "true" : "false");
     if (!s_pubKeyReady) { Utils::printSerial(F("JWT: public key not loaded")); return false; }
 
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266)
     {
         char dbuf[32];
         snprintf(dbuf, sizeof(dbuf), "hash0..3: %02X%02X%02X%02X", hash[0], hash[1], hash[2], hash[3]);
-        Utils::printSerial(dbuf);
+        DEBUG_LOG(dbuf);
         snprintf(dbuf, sizeof(dbuf), "sig0..3:  %02X%02X%02X%02X", sig[0], sig[1], sig[2], sig[3]);
-        Utils::printSerial(dbuf);
+        DEBUG_LOG(dbuf);
         snprintf(dbuf, sizeof(dbuf), "pubQ0..3: %02X%02X%02X%02X", s_pubKeyQ[0], s_pubKeyQ[1], s_pubKeyQ[2], s_pubKeyQ[3]);
-        Utils::printSerial(dbuf);
+        DEBUG_LOG(dbuf);
     }
     const br_ec_impl* ec  = br_ec_get_default();
     if (!ec) { Utils::printSerial(F("JWT: no EC impl")); return false; }
@@ -424,12 +454,12 @@ bool AuthManager::verifyAndParseJWT(const char* jwt, size_t jwtLen, bool verifyC
     s_vrfySig  = sig;
     thunk_ecdsa_vrfy_on_heap_stack();
     uint32_t vrfyResult = s_vrfyResult;
-    Utils::printSerial(F("DBG vrfy result="), vrfyResult == 1 ? F("OK\n") : F("FAILED\n"));
+    DEBUG_LOG_VAL("ECDSA verify result", vrfyResult == 1 ? "OK" : "FAILED");
     if (vrfyResult != 1) {
         Utils::printSerial(F("JWT: signature invalid"));
         return false;
     }
-#elif ARDUINO_ARCH_ESP32
+#elif defined(ARDUINO_ARCH_ESP32)
     uint8_t der[80];
     size_t  derLen = rawToAsn1Der(sig, 64, der, sizeof(der));
     if (derLen == 0) { Utils::printSerial(F("JWT: DER conversion failed")); return false; }

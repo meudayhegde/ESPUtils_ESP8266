@@ -4,13 +4,13 @@
 
 // ── Static member definitions ─────────────────────────────────────────────────
 SessionEntry  SessionManager::s_sessions[Config::MAX_SESSIONS];
-char          SessionManager::s_boundSub[64]        = {};
-bool          SessionManager::s_hasBoundSub         = false;
-String        SessionManager::s_challengeString     = "";
+char          SessionManager::s_boundSub[64]          = {};
+bool          SessionManager::s_hasBoundSub            = false;
+char          SessionManager::s_challengeString[9]    = {};   // 8 chars + NUL
 unsigned long SessionManager::s_challengeGeneratedTime = 0;
-bool          SessionManager::s_pendingBind         = false;
-String        SessionManager::s_pendingBindJWT      = "";
-String        SessionManager::s_pendingBindSub      = "";
+bool          SessionManager::s_pendingBind            = false;
+char          SessionManager::s_pendingBindJWT[512]   = {};
+char          SessionManager::s_pendingBindSub[64]    = {};
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -22,10 +22,10 @@ void SessionManager::begin() {
         s_sessions[i] = SessionEntry();
     }
 
-    // Generate initial challenge
-    s_challengeString         = generateChallengeString();
-    s_challengeGeneratedTime  = millis();
-    Utils::printSerial(F("Challenge: "), s_challengeString.c_str());
+    // Generate initial challenge into the static char buffer
+    generateChallengeString();
+    s_challengeGeneratedTime = millis();
+    Utils::printSerial(F("Challenge: "), s_challengeString);
 }
 
 void SessionManager::tick() {
@@ -34,17 +34,18 @@ void SessionManager::tick() {
 
     // Write bound JWT + sub to flash as a fixed-size binary struct
     BoundTokenData data;
-    strncpy(data.sub, s_pendingBindSub.c_str(), sizeof(data.sub) - 1);
+    strncpy(data.sub, s_pendingBindSub, sizeof(data.sub) - 1);
     data.sub[sizeof(data.sub) - 1] = '\0';
-    strncpy(data.jwt, s_pendingBindJWT.c_str(), sizeof(data.jwt) - 1);
+    strncpy(data.jwt, s_pendingBindJWT, sizeof(data.jwt) - 1);
     data.jwt[sizeof(data.jwt) - 1] = '\0';
 
     if (!StorageManager::saveBoundToken(data)) {
         Utils::printSerial(F("\nWarning: bound token save failed."));
     }
 
-    s_pendingBindJWT = "";
-    s_pendingBindSub = "";
+    // Clear the pending buffers
+    s_pendingBindJWT[0] = '\0';
+    s_pendingBindSub[0] = '\0';
 }
 
 // ── Session creation / validation ─────────────────────────────────────────────
@@ -69,8 +70,7 @@ String SessionManager::createSession(const char* sub) {
     return String(slot.token);
 }
 
-bool SessionManager::validateSession(const String& sessionToken) {
-    const char* tok = sessionToken.c_str();
+bool SessionManager::validateSession(const char* tok) {
     for (uint8_t i = 0; i < Config::MAX_SESSIONS; i++) {
         SessionEntry& slot = s_sessions[i];
         if (!slot.valid) continue;
@@ -96,10 +96,12 @@ void SessionManager::bindJWT(const char* rawJWT, const char* sub) {
     // Cache sub immediately
     setBoundSub(sub);
 
-    // Defer the flash write to loop() / tick()
-    s_pendingBindJWT = String(rawJWT);
-    s_pendingBindSub = String(sub);
-    s_pendingBind    = true;
+    // Copy JWT + sub into fixed-size buffers for deferred flash write
+    strncpy(s_pendingBindJWT, rawJWT, sizeof(s_pendingBindJWT) - 1);
+    s_pendingBindJWT[sizeof(s_pendingBindJWT) - 1] = '\0';
+    strncpy(s_pendingBindSub, sub, sizeof(s_pendingBindSub) - 1);
+    s_pendingBindSub[sizeof(s_pendingBindSub) - 1] = '\0';
+    s_pendingBind = true;
     Utils::printSerial(F("Bind JWT queued for flash write (sub: "), sub);
     Utils::printSerial(F(")"));
 }
@@ -120,20 +122,20 @@ void SessionManager::setBoundSub(const char* sub) {
 
 // ── Challenge management ──────────────────────────────────────────────────────
 
-String SessionManager::getCurrentChallenge() {
+const char* SessionManager::getCurrentChallenge() {
     updateChallenge();
     return s_challengeString;
 }
 
 void SessionManager::updateChallenge() {
-    unsigned long now  = millis();
-    bool rollover      = (now < s_challengeGeneratedTime);
-    bool stale         = (!rollover) && ((now - s_challengeGeneratedTime) >= CHALLENGE_REFRESH_INTERVAL);
-
+    const unsigned long now      = millis();
+    const bool         rollover  = (now < s_challengeGeneratedTime);
+    const bool         stale     = (!rollover) &&
+                                   ((now - s_challengeGeneratedTime) >= CHALLENGE_REFRESH_INTERVAL);
     if (rollover || stale) {
-        s_challengeString        = generateChallengeString();
+        generateChallengeString();
         s_challengeGeneratedTime = now;
-        Utils::printSerial(F("\nChallenge refreshed: "), s_challengeString.c_str());
+        Utils::printSerial(F("\nChallenge refreshed: "), s_challengeString);
     }
 }
 
@@ -148,12 +150,16 @@ void SessionManager::generateSessionToken(char* buf, size_t bufLen) {
     buf[40] = '\0';
 }
 
-String SessionManager::generateChallengeString() {
-    const char charset[]  = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const int  charsetLen = sizeof(charset) - 1;
-    String     ch         = "";
-    for (int i = 0; i < 8; i++) ch += charset[random(charsetLen)];
-    return ch;
+// Fills s_challengeString with 8 random alphanumeric chars + NUL.
+// No heap allocation — operates entirely on the static char array.
+void SessionManager::generateChallengeString() {
+    static const char kCharset[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    static const int  kCharsetLen = sizeof(kCharset) - 1; // 62
+    for (int i = 0; i < 8; i++) {
+        s_challengeString[i] = kCharset[random(kCharsetLen)];
+    }
+    s_challengeString[8] = '\0';
 }
 
 int SessionManager::findSlotBySub(const char* sub) {

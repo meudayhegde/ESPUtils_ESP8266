@@ -3,7 +3,7 @@
 
 bool StorageManager::begin() {
     Utils::printSerial(F("## Begin flash storage."));
-#ifdef ARDUINO_ARCH_ESP8266
+#if defined(ARDUINO_ARCH_ESP8266)
     if (LittleFS.begin()) {
         return true;
     }
@@ -11,8 +11,10 @@ bool StorageManager::begin() {
     Utils::printSerial(F("LittleFS mount failed, formatting..."));
     LittleFS.format();
     return LittleFS.begin();
-#elif ARDUINO_ARCH_ESP32
-    return LittleFS.begin(true);
+#elif defined(ARDUINO_ARCH_ESP32)
+    return LittleFS.begin(true); // true = format on failure
+#else
+    return false;
 #endif
 }
 
@@ -76,12 +78,11 @@ String StorageManager::readFile(const char* filePath) {
     return content;
 }
 
-bool StorageManager::writeFile(const char* filePath, const String& content) {
+bool StorageManager::writeFile(const char* filePath, const char* content) {
     File file = LittleFS.open(filePath, "w");
     if (!file) {
         return false;
     }
-    
     size_t bytesWritten = file.print(content);
     file.close();
     return bytesWritten > 0;
@@ -108,10 +109,11 @@ bool StorageManager::format() {
     
     Utils::printSerial(F("Factory reset successful."));
     
-    // Create empty GPIO config file
+    // Create empty GPIO config file (binary)
     Utils::printSerial(F("Creating File: "), "");
     Utils::printSerial(Config::GPIO_CONFIG_FILE, "...  ");
-    if (!writeFile(Config::GPIO_CONFIG_FILE, "[]")) {
+    GPIOConfigData emptyGPIO;
+    if (!saveGPIOConfig(emptyGPIO)) {
         Utils::printSerial(F("Failed!"));
         return false;
     }
@@ -215,6 +217,55 @@ bool StorageManager::saveBoundToken(const BoundTokenData& data) {
         Utils::printSerial(F("\nBound token saved."));
     } else {
         Utils::printSerial(F("\nBound token write failed."));
+    }
+    return ok;
+}
+
+bool StorageManager::loadGPIOConfig(GPIOConfigData& data) {
+    File file = LittleFS.open(Config::GPIO_CONFIG_FILE, "r");
+    if (!file) {
+        Utils::printSerial(F("No GPIO config file — using defaults."));
+        return false;
+    }
+
+    if (file.size() != sizeof(GPIOConfigData)) {
+        Utils::printSerial(F("GPIO config size mismatch — using defaults."));
+        file.close();
+        return false;
+    }
+
+    bool ok = (file.read(reinterpret_cast<uint8_t*>(&data), sizeof(GPIOConfigData)) == sizeof(GPIOConfigData));
+    file.close();
+
+    // Clamp count to valid range
+    if (data.count > MAX_GPIO_PINS) {
+        data.count = 0;
+    }
+
+    if (ok) {
+        Utils::printSerial(F("GPIO config loaded."));
+    } else {
+        Utils::printSerial(F("GPIO config read failed — using defaults."));
+    }
+    return ok;
+}
+
+bool StorageManager::saveGPIOConfig(const GPIOConfigData& data) {
+    deleteFile(Config::GPIO_CONFIG_FILE);
+
+    File file = LittleFS.open(Config::GPIO_CONFIG_FILE, "w");
+    if (!file) {
+        Utils::printSerial(F("Failed to open GPIO config for write."));
+        return false;
+    }
+
+    bool ok = (file.write(reinterpret_cast<const uint8_t*>(&data), sizeof(GPIOConfigData)) == sizeof(GPIOConfigData));
+    file.close();
+
+    if (ok) {
+        Utils::printSerial(F("GPIO config saved."));
+    } else {
+        Utils::printSerial(F("GPIO config write failed."));
     }
     return ok;
 }

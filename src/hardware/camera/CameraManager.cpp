@@ -1,8 +1,10 @@
 #include "CameraManager.h"
 
-#if defined(ESP_CAM_ENABLED)
+#if defined(ESP_CAM_HW_EXIST)
 
 bool CameraManager::_initialised = false;
+bool CameraManager::_enabled     = false;
+
 bool CameraManager::begin() {
     Utils::printSerial(F("## Initialising camera sensor."));
 
@@ -62,6 +64,7 @@ bool CameraManager::begin() {
         snprintf(buf, sizeof(buf), "0x%x", err);
         Utils::printSerial(buf);
         _initialised = false;
+        _enabled     = false;
         return false;
     }
 
@@ -87,6 +90,7 @@ bool CameraManager::begin() {
 
     Utils::printSerial(F("Camera sensor initialised."));
     _initialised = true;
+    _enabled     = true;
     return true;
 }
 
@@ -94,4 +98,29 @@ bool CameraManager::isInitialised() {
     return _initialised;
 }
 
-#endif  // ESP_CAM_ENABLED
+bool CameraManager::enable() {
+    if (_enabled) {
+        Utils::printSerial(F("Camera already enabled."));
+        return true;
+    }
+    if (!_initialised) {
+        // First-time init — begin() was deferred from boot
+        Utils::printSerial(F("## Camera not yet initialised — running begin()."));
+        return begin();
+    }
+    Utils::printSerial(F("## Re-enabling camera sensor."));
+    return begin();
+}
+
+void CameraManager::disable() {
+    if (!_enabled) return;
+    Utils::printSerial(F("## Disabling camera sensor."));
+    esp_camera_deinit();
+    _enabled = false;
+}
+
+bool CameraManager::isEnabled() {
+    return _enabled;
+}
+
+#endif  // ESP_CAM_HW_EXIST

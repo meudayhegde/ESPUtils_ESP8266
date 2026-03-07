@@ -40,29 +40,29 @@ namespace Utils {
     }
     
     uint64_t getDeviceID() {
-        #ifdef ARDUINO_ARCH_ESP8266
-            // For ESP8266: Use built-in chip ID
-            return ESP.getChipId();
-        #elif ARDUINO_ARCH_ESP32
-            // For ESP32: Get eFuseMac (48-bit unique identifier)
+        #if defined(ARDUINO_ARCH_ESP8266)
+            // ESP8266 chip ID is a 32-bit value derived from the MAC address
+            return (uint64_t)ESP.getChipId();
+        #elif defined(ARDUINO_ARCH_ESP32)
+            // ESP32 eFuseMac is a 48-bit factory-programmed unique identifier
             return ESP.getEfuseMac();
         #else
-            return 0;
+            return 0ULL;
         #endif
     }
-    
-    char* getDeviceIDString() {
+
+    // Returns a pointer to a static 16-byte buffer — copy immediately if persistence needed.
+    const char* getDeviceIDString() {
         uint64_t deviceid = getDeviceID();
         static char buffer[16];
-        
-        #ifdef ARDUINO_ARCH_ESP8266
-            // ESP8266 device ID is 32-bit
+        #if defined(ARDUINO_ARCH_ESP8266)
             snprintf(buffer, sizeof(buffer), "%08llX", (unsigned long long)deviceid);
-        #elif ARDUINO_ARCH_ESP32
-            // ESP32 eFuseMac is 48-bit (6 bytes)
-            snprintf(buffer, sizeof(buffer), "%012llX", (unsigned long long)(deviceid & 0xFFFFFFFFFFFFULL));
+        #elif defined(ARDUINO_ARCH_ESP32)
+            snprintf(buffer, sizeof(buffer), "%012llX",
+                     (unsigned long long)(deviceid & 0xFFFFFFFFFFFFULL));
+        #else
+            snprintf(buffer, sizeof(buffer), "%016llX", (unsigned long long)deviceid);
         #endif
-        
         return buffer;
     }
 }

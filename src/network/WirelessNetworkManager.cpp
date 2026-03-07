@@ -2,20 +2,20 @@
 #include "../utils/Utils.h"
 #ifdef ARDUINO_ARCH_ESP8266
     #include <ESP8266mDNS.h>
-#elif ARDUINO_ARCH_ESP32
+#elif defined(ARDUINO_ARCH_ESP32)
     #include <ESPmDNS.h>
 #endif
 
 WirelessConfig WirelessNetworkManager::wirelessConfig;
-bool WirelessNetworkManager::wirelessUpdatePending = false;
-String WirelessNetworkManager::cachedMacAddress;
+bool           WirelessNetworkManager::wirelessUpdatePending = false;
+char           WirelessNetworkManager::cachedMacAddress[18]  = {};
 
 void WirelessNetworkManager::begin() {
     Utils::printSerial(F("## Initialize Network Manager."));
-    
-    // Cache MAC address (it never changes)
-    if (cachedMacAddress.length() == 0) {
-        cachedMacAddress = WiFi.macAddress();
+
+    // Cache MAC address once — it never changes after boot
+    if (cachedMacAddress[0] == '\0') {
+        WiFi.macAddress().toCharArray(cachedMacAddress, sizeof(cachedMacAddress));
     }
 }
 
@@ -263,35 +263,35 @@ void WirelessNetworkManager::initRangeExtender() {
 #endif
 }
 
-bool WirelessNetworkManager::initMDNS(const String& deviceID) {
+bool WirelessNetworkManager::initMDNS(const char* deviceID) {
     Utils::printSerial(F("## Setting up mDNS responder..."));
-    
+
     // Stop any existing mDNS instance
-    #ifdef ARDUINO_ARCH_ESP32
+    #if defined(ARDUINO_ARCH_ESP32)
         MDNS.end();
         delay(100);
     #endif
-    
+
     // mDNS hostname will be: <deviceID>.local
-    if (!MDNS.begin(deviceID.c_str())) {
+    if (!MDNS.begin(deviceID)) {
         Utils::printSerial(F("Error setting up mDNS responder!"));
         return false;
     }
-    
+
     Utils::printSerial(F("mDNS responder started: "), "");
-    Utils::printSerial(deviceID.c_str(), ".local");
+    Utils::printSerial(deviceID, ".local");
     Serial.println();
-    
+
     // Add HTTP service with instance name
     MDNS.addService("http", "tcp", Config::HTTP_PORT);
-    
+
     Utils::printSerial(F("HTTP service advertised via mDNS."));
-    
+
     // Force initial announcement
-    #ifdef ARDUINO_ARCH_ESP8266
+    #if defined(ARDUINO_ARCH_ESP8266)
         MDNS.announce();
     #endif
-    
+
     return true;
 }
 
@@ -312,19 +312,27 @@ const WirelessConfig& WirelessNetworkManager::getWirelessConfig() {
     return wirelessConfig;
 }
 
-String WirelessNetworkManager::getWirelessConfigJson() {
-    // Build JSON directly — no heap-heavy JsonDocument needed for 5 scalar fields
-    char buf[320];
+const char* WirelessNetworkManager::getWirelessConfigJson() {
+    // Build JSON once into a static buffer — no heap allocation.
+    // Passwords are masked for security; only mode and SSIDs are exposed.
+    static char buf[256];
     snprintf(buf, sizeof(buf),
         "{\"wireless_mode\":\"%s\",\"station_ssid\":\"%s\","
-        "\"station_psk\":\"%s\",\"ap_ssid\":\"%s\",\"ap_psk\":\"%s\"}",
+        "\"station_psk\":\"****\",\"ap_ssid\":\"%s\",\"ap_psk\":\"****\"}",
         wirelessConfig.mode,
         wirelessConfig.stationSSID,
-        wirelessConfig.stationPSK,
-        wirelessConfig.apSSID,
-        wirelessConfig.apPSK
+        wirelessConfig.apSSID
     );
-    return String(buf);
+    return buf;
+}
+
+void WirelessNetworkManager::getWirelessConfigBinary(BinWirelessGetResponse* out) {
+    memset(out, 0, sizeof(BinWirelessGetResponse));
+    strncpy(out->wireless_mode, wirelessConfig.mode, sizeof(out->wireless_mode) - 1);
+    strncpy(out->station_ssid, wirelessConfig.stationSSID, sizeof(out->station_ssid) - 1);
+    strncpy(out->station_psk, "****", sizeof(out->station_psk) - 1);
+    strncpy(out->ap_ssid, wirelessConfig.apSSID, sizeof(out->ap_ssid) - 1);
+    strncpy(out->ap_psk, "****", sizeof(out->ap_psk) - 1);
 }
 
 bool WirelessNetworkManager::isWirelessUpdatePending() {
@@ -335,22 +343,41 @@ void WirelessNetworkManager::clearWirelessUpdateFlag() {
     wirelessUpdatePending = false;
 }
 
-const String& WirelessNetworkManager::getMacAddress() {
+const char* WirelessNetworkManager::getMacAddress() {
     return cachedMacAddress;
 }
 
-String WirelessNetworkManager::getIPAddress() {
+const char* WirelessNetworkManager::getIPAddress() {
+    static char buf[64]; // large enough for dual-mode "A.B.C.D (STA) / E.F.G.H (AP)"
     WiFiMode_t wifiMode = WiFi.getMode();
     if (wifiMode == WIFI_STA) {
-        return WiFi.localIP().toString();
+        WiFi.localIP().toString().toCharArray(buf, sizeof(buf));
     } else if (wifiMode == WIFI_AP_STA) {
         // Range extender: report both IPs
         String ips = WiFi.localIP().toString();
         ips += F(" (STA) / ");
         ips += WiFi.softAPIP().toString();
         ips += F(" (AP)");
-        return ips;
+        ips.toCharArray(buf, sizeof(buf));
     } else {
-        return WiFi.softAPIP().toString();
+        WiFi.softAPIP().toString().toCharArray(buf, sizeof(buf));
     }
+    return buf;
+}
+
+// ================================
+// WiFi Scanning (non-blocking)
+// ================================
+
+void WirelessNetworkManager::startScan() {
+    Utils::printSerial(F("Starting async WiFi scan."));
+    WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/false);
+}
+
+int8_t WirelessNetworkManager::getScanResult() {
+    return static_cast<int8_t>(WiFi.scanComplete());
+}
+
+void WirelessNetworkManager::clearScan() {
+    WiFi.scanDelete();
 }

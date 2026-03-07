@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "../config/Config.h"
+#include "SafeString.h"
 
 namespace Utils {
     /**
@@ -49,6 +50,13 @@ namespace Utils {
     }
     
     /**
+     * @brief Toggle LED state
+     */
+    inline void toggleLED() {
+        digitalWrite(Config::LED_PIN, !digitalRead(Config::LED_PIN));
+    }
+    
+    /**
      * @brief Get unique device ID (eFuseMac) from device
      * Works for both ESP8266 and ESP32
      * @return 48-bit device ID as uint64_t
@@ -57,9 +65,10 @@ namespace Utils {
     
     /**
      * @brief Get device ID as formatted hex string
-     * @return Device ID formatted as uppercase hex (e.g., "AABBCCDDEEFF")
+     * @return Pointer to a static buffer containing uppercase hex (e.g., "AABBCCDDEEFF").
+     *         IMPORTANT: the buffer is overwritten on each call — copy if you need persistence.
      */
-    char* getDeviceIDString();
+    const char* getDeviceIDString();
 }
 
 #endif // UTILS_H

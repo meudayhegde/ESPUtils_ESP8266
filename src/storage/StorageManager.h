@@ -33,17 +33,17 @@ public:
     /**
      * @brief Read entire file as string
      * @param filePath Path to the file
-     * @return File contents as String, empty if failed
+     * @return File contents as String, empty String if failed
      */
     static String readFile(const char* filePath);
-    
+
     /**
-     * @brief Write string to file
+     * @brief Write a C-string to a file (creates or overwrites)
      * @param filePath Path to the file
-     * @param content Content to write
+     * @param content  Null-terminated content to write
      * @return true if successful, false otherwise
      */
-    static bool writeFile(const char* filePath, const String& content);
+    static bool writeFile(const char* filePath, const char* content);
     
     /**
      * @brief Delete a file
@@ -92,6 +92,20 @@ public:
      * @return true if successful, false otherwise
      */
     static bool saveBoundToken(const BoundTokenData& data);
+
+    /**
+     * @brief Load GPIO configuration from binary file
+     * @param data GPIOConfigData struct to populate
+     * @return true if successful, false otherwise
+     */
+    static bool loadGPIOConfig(GPIOConfigData& data);
+
+    /**
+     * @brief Save GPIO configuration to binary file
+     * @param data GPIOConfigData struct to save
+     * @return true if successful, false otherwise
+     */
+    static bool saveGPIOConfig(const GPIOConfigData& data);
 };
 
 #endif // STORAGE_MANAGER_H

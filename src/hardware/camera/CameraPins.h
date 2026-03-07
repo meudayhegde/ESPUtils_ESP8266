@@ -1,4 +1,7 @@
 
+#ifndef CAMERA_PINS_H
+#define CAMERA_PINS_H
+
 #if defined(CAMERA_MODEL_WROVER_KIT)
 #define PWDN_GPIO_NUM  -1
 #define RESET_GPIO_NUM -1
@@ -332,5 +335,7 @@
 #define VSYNC_GPIO_NUM 6
 #define HREF_GPIO_NUM  42
 #define PCLK_GPIO_NUM  5
+
+#endif // CAMERA_PINS_H
 
 #endif

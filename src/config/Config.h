@@ -2,81 +2,98 @@
 #define CONFIG_H
 
 #include <Arduino.h>
+#include "Features.h"
 
-// ================================
+// ════════════════════════════════════════════════════════════════════════
 // Device Configuration
-// ================================
+//
+// String constants that are large (JWT_PUB_KEY, file paths, firmware
+// version) are declared extern — defined once in Config.cpp — so that
+// the linker keeps a single copy in flash instead of one per TU.
+//
+// Short identity strings remain inline (negligible duplication).
+// ════════════════════════════════════════════════════════════════════════
 namespace Config {
-    const char FIRMWARE_VERSION[] = "{{--@FIRMWARE_VERSION@--}}";
-    // const char DEVICE_SECRET_KEY[] = "{{--@DEVICE_SECRET_KEY@--}}";
-    const char JWT_PUB_KEY[] = "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIAnXvd2yBqvGfsjTi4cAQ0hYkaRi\n/MqU8VSHyIBzErl8L2A2SERAXb6Epvjv4Zb5nu78LiIfkuB6gJvMj/fUrA==\n-----END PUBLIC KEY-----";
-    
-    // Device Identity
-    const char DEVICE_NAME[] = "ESPUtils";
-    const char DEVICE_PASSWORD[] = "ESP.device@8266";
-    const char DEFAULT_MODE[] = "AP"; // AP / WIFI
 
-    // Hardware Pin Configuration
-    #ifdef ARDUINO_ARCH_ESP8266
+    // ── Firmware version (substituted at build time by create_ota_package.py)
+    extern const char FIRMWARE_VERSION[];
+
+    // ── Authentication — EC P-256 public key (PEM format, verified only)
+    extern const char JWT_PUB_KEY[];
+
+    // ── Device identity (short — kept inline for convenience)
+    const char DEVICE_NAME[]     = "AetherPulse";
+    const char DEVICE_PASSWORD[] = "ESP.device@8266";
+    const char DEFAULT_MODE[]    = "AP"; // AP | WIFI | AP_STA
+
+    // ── Hardware pin configuration ────────────────────────────────────────
+    #if defined(LED_BUILTIN)
+        constexpr uint8_t LED_PIN = LED_BUILTIN;
+    #elif defined(ARDUINO_ARCH_ESP8266)
         constexpr uint8_t LED_PIN = 2;
-    #elif ARDUINO_ARCH_ESP32
+    #elif defined(ARDUINO_ARCH_ESP32)
         constexpr uint8_t LED_PIN = 8;
     #endif
-    
+
     constexpr uint8_t IR_RECV_PIN = 14;
     constexpr uint8_t IR_SEND_PIN = 4;
-    
-    // Network Ports
+
+    // ── Network ports ─────────────────────────────────────────────────────
     constexpr uint16_t HTTP_PORT          = 80;
     constexpr uint16_t OTA_PORT           = 48325;
-    // Camera stream port (ESP32 only) — the embedded camera HTML/JS
-    // constructs the stream URL as  document.location.origin + ':81'
-    constexpr uint16_t CAMERA_STREAM_PORT = 81;   // MJPEG stream (hardcoded in JS)
-    
-    // Timing Configuration
-    constexpr uint8_t RECV_TIMEOUT_SEC = 8;
-    constexpr uint8_t WIRELESS_TIMEOUT_SEC = 20;
-    constexpr uint8_t IR_TIMEOUT_MS = 50;
-    
-    // Session Configuration
-    constexpr unsigned long SESSION_EXPIRY_SECONDS = 604800;      // 1 week in seconds
-    constexpr unsigned long SESSION_EXPIRY_MS      = 604800000UL; // 1 week in ms (for millis() comparison)
-    constexpr uint8_t       MAX_SESSIONS           = 5;           // max concurrent session tokens
-    
-    // Serial Configuration
-    constexpr uint32_t BAUD_RATE = 115200;
-    constexpr bool SERIAL_MONITOR_ENABLED = true;
-    constexpr bool LEGACY_TIMING_INFO = false;
-    
-    // IR Configuration
+    // Camera stream port (ESP32 only — the embedded JS uses origin + ':81')
+    constexpr uint16_t CAMERA_STREAM_PORT = 81;
+
+    // ── Timing ────────────────────────────────────────────────────────────
+    constexpr uint8_t  RECV_TIMEOUT_SEC     = 8;
+    constexpr uint8_t  WIRELESS_TIMEOUT_SEC = 20;
+    constexpr uint8_t  IR_TIMEOUT_MS        = 50;
+
+    // ── Session ───────────────────────────────────────────────────────────
+    constexpr unsigned long SESSION_EXPIRY_SECONDS = 604800UL;       // 1 week
+    constexpr unsigned long SESSION_EXPIRY_MS      = 604800000UL;    // 1 week (millis)
+    constexpr uint8_t       MAX_SESSIONS           = 5;
+
+    // ── Serial ────────────────────────────────────────────────────────────
+    constexpr uint32_t BAUD_RATE             = 115200;
+    constexpr bool     SERIAL_MONITOR_ENABLED = (FEATURE_SERIAL_LOG_ENABLED != 0);
+    constexpr bool     LEGACY_TIMING_INFO     = false;
+
+    // ── IR ────────────────────────────────────────────────────────────────
     constexpr uint16_t CAPTURE_BUFFER_SIZE = 1024;
-    constexpr uint16_t IR_FREQUENCY = 38000;
-    constexpr uint8_t MIN_UNKNOWN_SIZE = 12;
-    
-    // Camera Configuration (ESP32 only)
-    constexpr uint32_t CAMERA_XCLK_FREQ_HZ = 20000000;  // 20 MHz
-    
-    // Range Extender Configuration
-    // ESP8266: lwIP NAPT table sizes (heap-limited; default 1000/10 is a safe choice)
-    constexpr uint16_t NAPT_TABLE_SIZE = 1000;
+    constexpr uint16_t IR_FREQUENCY        = 38000;
+    constexpr uint8_t  MIN_UNKNOWN_SIZE    = 12;
+    // Maximum number of raw IR entries to send (prevents 2 KB VLA on stack)
+    constexpr uint16_t IR_RAW_SEND_MAX     = 512;
+
+    // ── Camera (ESP32 only) ───────────────────────────────────────────────
+    constexpr uint32_t CAMERA_XCLK_FREQ_HZ = 20000000; // 20 MHz
+
+    // ── Range extender ────────────────────────────────────────────────────
+    // ESP8266 lwIP NAPT table sizes
+    constexpr uint16_t NAPT_TABLE_SIZE      = 1000;
     constexpr uint16_t NAPT_PORT_TABLE_SIZE = 10;
-    // AP-side address used by the range-extender soft-AP (Android-compatible Google subnet)
-    const uint8_t RANGE_EXT_AP_IP[4]      = { 172, 217, 28, 254 };
-    const uint8_t RANGE_EXT_AP_SUBNET[4]  = { 255, 255, 255, 0  };
+    // Soft-AP address (android-compatible Google subnet)
+    const uint8_t RANGE_EXT_AP_IP[4]     = { 172, 217,  28, 254 };
+    const uint8_t RANGE_EXT_AP_SUBNET[4] = { 255, 255, 255,   0 };
     // ESP32 AP-side defaults
-    const uint8_t RANGE_EXT32_AP_IP[4]       = { 192, 168,  4, 1 };
-    const uint8_t RANGE_EXT32_AP_LEASE[4]    = { 192, 168,  4, 2 };
-    const uint8_t RANGE_EXT32_AP_DNS[4]      = {   8,   8,  4, 4 };
-    
-    // Protocol Configuration
+    const uint8_t RANGE_EXT32_AP_IP[4]    = { 192, 168,  4,   1 };
+    const uint8_t RANGE_EXT32_AP_LEASE[4] = { 192, 168,  4,   2 };
+    const uint8_t RANGE_EXT32_AP_DNS[4]   = {   8,   8,  4,   4 };
+
+    // ── Protocol ──────────────────────────────────────────────────────────
     constexpr uint16_t MAX_REQUEST_LENGTH = 5120;
-    
-    // File Paths
-    const char WIFI_CONFIG_FILE[] = "/WiFiConfig.bin";
-    const char LOGIN_CREDENTIAL_FILE[] = "/LoginCredential.json";
-    const char GPIO_CONFIG_FILE[] = "/GPIOConfig.json";
-    const char SESSION_FILE[] = "/Session.json";
-    const char BOUND_TOKEN_FILE[] = "/BoundToken.bin";  // persisted JWT used to verify identity on boot
+
+    // ── Rate limiting ─────────────────────────────────────────────────────
+    constexpr uint8_t  RATE_LIMIT_MAX_REQUESTS = 2;      // max requests per window
+    constexpr uint32_t RATE_LIMIT_WINDOW_MS     = 1000;  // sliding window duration (ms)
+
+    // ── Flash file paths (extern — single copy in flash via Config.cpp) ───
+    extern const char WIFI_CONFIG_FILE[];
+    extern const char LOGIN_CREDENTIAL_FILE[];
+    extern const char GPIO_CONFIG_FILE[];
+    extern const char SESSION_FILE[];
+    extern const char BOUND_TOKEN_FILE[];
 }
 
 // ================================
@@ -111,33 +128,50 @@ struct WirelessConfig {
     }
 };
 
-struct GPIOConfig {
-    int pinNumber;
-    String pinMode;
-    int pinValue;
-    
-    GPIOConfig() : pinNumber(-1), pinMode(""), pinValue(0) {}
-    GPIOConfig(int pin, const String& mode, int value) : 
-        pinNumber(pin), pinMode(mode), pinValue(value) {}
+// GPIO pin mode — sequential enum stored as uint8_t.
+//   0 = INPUT, 1 = OUTPUT, 2 = INPUT_PULLUP, 3 = INPUT_PULLDOWN
+enum GPIOPinMode : uint8_t {
+    AP_GPIO_INPUT          = 0,
+    AP_GPIO_OUTPUT         = 1,
+    AP_GPIO_INPUT_PULLUP   = 2,
+    AP_GPIO_INPUT_PULLDOWN = 3,
 };
 
-// ================================
-// Response Messages
-// ================================
+// Single GPIO pin configuration (binary-safe, no strings).
+struct GPIOConfig {
+    int     pinNumber;
+    uint8_t mode;       // GPIOPinMode enum value
+    int     pinValue;
+
+    GPIOConfig() : pinNumber(-1), mode(AP_GPIO_INPUT), pinValue(0) {}
+    GPIOConfig(int pin, uint8_t m, int value) : pinNumber(pin), mode(m), pinValue(value) {}
+};
+
+// Fixed-size container written as a single binary blob to flash.
+static constexpr uint8_t MAX_GPIO_PINS = 20;
+
+struct GPIOConfigData {
+    uint8_t    count;
+    GPIOConfig pins[MAX_GPIO_PINS];
+
+    GPIOConfigData() : count(0) {}
+};
+
+// ── Response message tokens (extern — single definition in Config.cpp) ────────
 namespace ResponseMsg {
-    const char SUCCESS[] = "success";
-    const char FAILURE[] = "failure";
-    const char DENY[] = "deny";
-    const char UNAUTHORIZED[] = "unauthorized";
-    const char AUTHENTICATED[] = "authenticated";
-    const char INVALID_TOKEN[] = "invalid_token";
-    const char SESSION_EXPIRED[] = "session_expired";
-    const char TIMEOUT[] = "timeout";
-    const char PROGRESS[] = "progress";
-    const char UNDEFINED[] = "undefined";
-    const char INVALID_PURPOSE[] = "Invalid Purpose";
-    const char JSON_ERROR[] = "JSON Error, failed to parse the request";
-    const char PURPOSE_NOT_DEFINED[] = "Purpose not defined";
+    extern const char SUCCESS[];
+    extern const char FAILURE[];
+    extern const char DENY[];
+    extern const char UNAUTHORIZED[];
+    extern const char AUTHENTICATED[];
+    extern const char INVALID_TOKEN[];
+    extern const char SESSION_EXPIRED[];
+    extern const char TIMEOUT[];
+    extern const char PROGRESS[];
+    extern const char UNDEFINED[];
+    extern const char INVALID_PURPOSE[];
+    extern const char JSON_ERROR[];
+    extern const char PURPOSE_NOT_DEFINED[];
 }
 
 #endif // CONFIG_H

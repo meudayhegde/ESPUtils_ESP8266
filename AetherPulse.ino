@@ -1,18 +1,13 @@
 #include <Arduino.h>
 #include <ArduinoOTA.h>
 
-#ifdef ARDUINO_ARCH_ESP8266
-    #include <ESP8266WiFi.h>
-    #include <ESP8266WebServer.h>
+#include "src/platform/Platform.h"
+
+// mDNS (platform-specific); camera board detection handled by Platform.h
+#if defined(ARDUINO_ARCH_ESP8266)
     #include <ESP8266mDNS.h>
-    typedef ESP8266WebServer WebServerType;
-#elif ARDUINO_ARCH_ESP32
-    #include <WiFi.h>
-    #include <WebServer.h>
+#elif defined(ARDUINO_ARCH_ESP32)
     #include <ESPmDNS.h>
-    #include "src/hardware/camera/board_config.h"
-    
-    typedef WebServer WebServerType;
 #endif
 
 // Application Modules
@@ -26,8 +21,8 @@
 #include "src/hardware/infrared/IRManager.h"
 #include "src/handlers/RequestHandler.h"
 
-// Camera Module (only on ESP32 boards with a camera — ESP_CAM_ENABLED set by board_config.h)
-#if defined(ESP_CAM_ENABLED)
+// Camera Module (only on ESP32 boards with a camera — ESP_CAM_HW_EXIST set by Platform.h)
+#if defined(ESP_CAM_HW_EXIST)
 #include "src/hardware/camera/CameraManager.h"
 #include "src/handlers/CameraHandler.h"
 #endif
@@ -88,20 +83,13 @@ void setup() {
     snprintf(portBuffer, sizeof(portBuffer), "%u", Config::HTTP_PORT);
     Utils::printSerial(portBuffer);
 
-    // Initialise camera (only on boards with ESP_CAM_ENABLED)
-#if defined(ESP_CAM_ENABLED)
-    Utils::printSerial(F("## Initialising Camera module."));
-    if (CameraManager::begin()) {
-        CameraHandler::setupLedFlash();
-        CameraHandler::setupRoutes(httpServer);
-        CameraHandler::startStreamServer();
-        Utils::printSerial(F("\nCamera UI:     http://"), "");
-        Utils::printSerial(WirelessNetworkManager::getIPAddress().c_str(), "");
-        Utils::printSerial(F("\nCamera stream: http://"), "");
-        Utils::printSerial(WirelessNetworkManager::getIPAddress().c_str(), ":81/stream");
-    } else {
-        Utils::printSerial(F("Camera module skipped (init failed)."));
-    }
+    // Camera routes (only on boards with ESP_CAM_HW_EXIST)
+    // Camera hardware is NOT initialised at boot — it will be started on
+    // demand when the user enables it via PUT /api/camera/enable.
+#if defined(ESP_CAM_HW_EXIST)
+    CameraHandler::setupLedFlash();
+    CameraHandler::setupRoutes(httpServer);
+    Utils::printSerial(F("Camera routes registered (camera disabled until enabled by user)."));
 #endif
     
     // Setup OTA updates
@@ -114,16 +102,16 @@ void setup() {
     Utils::printSerial(F("Device ID: "), "");
     Utils::printSerial(Utils::getDeviceIDString());
     Utils::printSerial(F("IP: "), "");
-    Utils::printSerial(WirelessNetworkManager::getIPAddress().c_str());
+    Utils::printSerial(WirelessNetworkManager::getIPAddress());
     Utils::printSerial(F("MAC: "), "");
-    Utils::printSerial(WirelessNetworkManager::getMacAddress().c_str());
+    Utils::printSerial(WirelessNetworkManager::getMacAddress());
     Utils::printSerial(F("mDNS: "), "");
     Utils::printSerial(deviceID.c_str(), ".local");
     Serial.println();
     Utils::printSerial(F("========================================\n"));
 
     // Initialize mDNS with device ID
-    WirelessNetworkManager::initMDNS(deviceID);
+    WirelessNetworkManager::initMDNS(deviceID.c_str());
 
     Utils::ledPulse(10, 50, 50);
 }
@@ -210,7 +198,7 @@ void loop() {
         // Reinitialize mDNS after network change
         String deviceID = Utils::getDeviceIDString();
         deviceID.toLowerCase();
-        WirelessNetworkManager::initMDNS(deviceID);
+        WirelessNetworkManager::initMDNS(deviceID.c_str());
     }
     
     // Optional: Check for factory reset trigger

@@ -1,10 +1,10 @@
 #ifndef CAMERA_HANDLER_H
 #define CAMERA_HANDLER_H
 
-#include "../hardware/camera/board_config.h"
+#include "../platform/Platform.h"
 
 // Camera module is only available on ESP32 boards with a camera model defined
-#if defined(ESP_CAM_ENABLED)
+#if defined(ESP_CAM_HW_EXIST)
 
 #include <Arduino.h>
 #include <WebServer.h>
@@ -21,14 +21,14 @@ typedef WebServer WebServerType;
  * ESP-IDF httpd server on Config::CAMERA_STREAM_PORT (default 81).
  *
  * Exposed endpoints:
- *   GET /          — Camera control web UI
- *   GET /status    — JSON camera sensor status
- *   GET /control?var=<name>&val=<value>  — Set sensor parameter
- *   GET /capture   — Capture single JPEG
- *   GET /bmp       — Capture single BMP
- *   GET /xclk      — Set XCLK frequency
- *   GET /reg, /greg, /pll, /resolution  — Low-level sensor registers
- *   GET /stream    — MJPEG stream (on stream port 81)
+ *   GET  /          — Camera control web UI
+ *   GET  /status    — Binary camera sensor status (BinCameraStatus + regs)
+ *   POST /control   — Set sensor parameter (binary BinCameraControl body)
+ *   GET  /capture   — Capture single JPEG
+ *   GET  /bmp       — Capture single BMP
+ *   GET  /xclk      — Set XCLK frequency
+ *   GET  /reg, /greg, /pll, /resolution  — Low-level sensor registers
+ *   GET  /stream    — MJPEG stream (on stream port 81)
  */
 class CameraHandler {
 public:
@@ -50,5 +50,5 @@ public:
     static void setupLedFlash();
 };
 
-#endif  // ESP_CAM_ENABLED
+#endif  // ESP_CAM_HW_EXIST
 #endif  // CAMERA_HANDLER_H
